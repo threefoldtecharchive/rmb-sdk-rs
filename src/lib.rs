@@ -1,10 +1,9 @@
 mod client;
-mod server;
 mod msg;
+mod server;
 
-pub use client::{Client, request::Request, response::Response};
+pub use client::{request::Request, Client};
 pub use server::Server;
-
 
 // mod msg;
 // use anyhow::{Context, Result};
@@ -96,64 +95,84 @@ pub use server::Server;
 //     }
 // }
 
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
 
-//     use super::*;
-//     async fn create_rmb_client<'a>() -> RmbClient {
-//         let manager = RedisConnectionManager::new("redis://127.0.0.1/")
-//             .context("unable to create redis connection manager")
-//             .unwrap();
-//         let pool = Pool::builder()
-//             .build(manager)
-//             .await
-//             .context("unable to build pool or redis connection manager")
-//             .unwrap();
-//         let client = RmbClient::new(pool);
+    use anyhow::Context;
+    use bb8_redis::{bb8::Pool, RedisConnectionManager};
+    use futures::{Stream, StreamExt};
 
-//         client
-//     }
+    use crate::msg::Message;
 
-//     fn create_test_msg() -> Message {
-//         let mut msg = Message::default();
-//         // msg.id = uuid::Uuid::new_v4().to_string();
-//         msg.destination = vec![55];
-//         msg.command = "test".to_string();
-//         msg.data = "some test data".to_string();
-//         msg.retry = 1;
-//         msg.source = 55;
-//         msg.expiration = 1000;
+    use super::*;
+    async fn create_rmb_client<'a>() -> Client {
+        let manager = RedisConnectionManager::new("redis://127.0.0.1/")
+            .context("unable to create redis connection manager")
+            .unwrap();
+        let pool = Pool::builder()
+            .build(manager)
+            .await
+            .context("unable to build pool or redis connection manager")
+            .unwrap();
+        let client = Client::new(pool);
 
-//         msg
-//     }
+        client
+    }
 
-//     #[tokio::test]
-//     async fn test_whole_process() {
-//         let client = create_rmb_client().await;
+    fn create_test_msg() -> Message {
+        let mut msg = Message::default();
+        // msg.id = uuid::Uuid::new_v4().to_string();
+        msg.destination = vec![55];
+        msg.command = "test".to_string();
+        msg.data = "some test data".to_string();
+        msg.retry = 1;
+        msg.source = 55;
+        msg.expiration = 1000;
 
-//         // prepare message
-//         let mut msg = create_test_msg();
-//         msg.data = "sending...".to_string();
+        msg
+    }
 
-//         //send the message [cmd]
-//         client.send(&msg).await.unwrap();
-//         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    #[tokio::test]
+    async fn test_whole_process() {
 
-//         // get the cmd [message]
-//         let mut cmd = client.cmd("test").await.unwrap();
-//         let rep = uuid::Uuid::new_v4().to_string();
-//         cmd.reply = rep.clone();
-//         // assert that the data is the same
-//         assert_eq!(msg.data, cmd.data);
 
-//         // reply
-//         cmd.data = "return response".to_string();
-//         client.reply(rep.clone(), &cmd).await.unwrap();
-//         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        let client = create_rmb_client().await;
 
-//         // get the response
-//         let received_msg = client.response(rep).await.unwrap();
+        // create request
+        let req = Request::new("calc.add").args([1, 2]).destination(55);
 
-//         assert_eq!(cmd.data, received_msg.data);
-//     }
-// }
+        // send it
+        let mut resp = client.request(req).await.unwrap();
+
+        // this will work in a separate thread or just in a loop
+        loop {
+            while let Some(value) = resp.next().await {
+                match value {
+                    Ok(msg) => {}
+                    Err(err) => {}
+                }
+            }
+        }
+
+        // //send the message [cmd]
+        // client.send(&msg).await.unwrap();
+        // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // // get the cmd [message]
+        // let mut cmd = client.cmd("test").await.unwrap();
+        // let rep = uuid::Uuid::new_v4().to_string();
+        // cmd.reply = rep.clone();
+        // // assert that the data is the same
+        // assert_eq!(msg.data, cmd.data);
+
+        // // reply
+        // cmd.data = "return response".to_string();
+        // client.reply(rep.clone(), &cmd).await.unwrap();
+        // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // // get the response
+        // let received_msg = client.response(rep).await.unwrap();
+
+        // assert_eq!(cmd.data, received_msg.data);
+    }
+}

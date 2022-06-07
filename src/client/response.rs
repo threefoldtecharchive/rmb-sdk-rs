@@ -27,8 +27,6 @@ impl Response {
         Ok(conn)
     }
 
-    /// Get response from the remote/local twin
-    /// [call this after use the send function]
     pub fn response<C: AsRef<str>>(self, ret: C) -> impl Stream<Item = Result<Message>> {
         stream! {
             let mut conn = self.get_connection().await.unwrap();
