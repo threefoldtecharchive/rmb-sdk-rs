@@ -1,6 +1,8 @@
 pub mod request;
 pub mod response;
 
+use std::pin::Pin;
+
 use anyhow::{Context, Result};
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
@@ -8,10 +10,11 @@ use bb8_redis::{
     RedisConnectionManager,
 };
 use futures::Stream;
-use request::Request; 
+use request::Request;
 use response::Response;
+use uuid::Uuid;
 
-use crate::{msg::Message};
+use crate::msg::Message;
 
 enum Queue {
     Local,
@@ -52,12 +55,17 @@ impl Client {
         Ok(conn)
     }
 
-    pub async fn request(&self, req: Request) -> Result<impl Stream<Item = Result<Message>>> {
+    pub async fn request(
+        &self,
+        req: Request,
+    ) -> Result<Pin<Box<impl Stream<Item = Result<Message>>>>> {
         let mut conn = self.get_connection().await?;
         conn.rpush(Queue::Local.as_ref(), req.body())
             .await
             .context("unable to send your message")?;
-        let response = Response::new(self.pool.clone()).response(Queue::Reply.as_ref());
+
+        let ret_queue = Uuid::new_v4().to_string();
+        let response = Box::pin(Response::new(self.pool.clone()).response(ret_queue));
 
         Ok(response)
     }
