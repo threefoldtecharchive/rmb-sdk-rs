@@ -1,9 +1,8 @@
-use std::time::SystemTime;
 
 use crate::msg::Message;
 use crate::util;
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
     redis::AsyncCommands,
@@ -42,41 +41,43 @@ impl Response {
         Ok(conn)
     }
 
-    pub async fn get(&mut self) -> Option<Result<ResponseBody>> {
+    pub async fn get(&mut self) -> Result<Option<ResponseBody>> {
         let timeout = util::timestamp() - self.deadline;
 
         if timeout == 0 || self.response_num == 0 {
-            return None;
+            return Ok(None);
         }
-        let msg: Result<Message> = {
+        let msg: Message = {
             let mut conn = self.get_connection().await.unwrap();
             conn.brpop(&self.ret_queue, timeout)
                 .await
-                .context("failed to get a response message")
-                .map_err(|err| anyhow::anyhow!("{}", err))
+                .context("failed to get a response message")?
         };
         self.response_num -= 1;
 
-        if msg.is_err() {
-            return Some(Err(msg.err().unwrap()));
-        }
 
-        let data = base64::decode(msg.unwrap().data);
-
-        let data = if let Err(err) = data {
-            return Some(Err(anyhow::Error::from(err)));
+        let payload = if let Some(err) = msg.error {
+            Err(ResponseErr::Remote(err))
         } else {
-            data.unwrap()
+            let data = base64::decode(msg.data).with_context(|| "can not decode the received response");
+
+            if let Err(err) = data {
+                Err(ResponseErr::Protocol(err.to_string()))
+            } else {
+                Ok(Some(data.unwrap()))
+            }
         };
 
-        Some(Ok(ResponseBody(String::from_utf8(data).unwrap())))
+        Ok(Some(ResponseBody { payload, schema: msg.schema }))
     }
 }
 
-pub struct ResponseBody(String);
-
-impl ResponseBody {
-    pub fn body(self) -> impl ToString {
-        self.0
-    }
+type Payload = Result<Option<Vec<u8>>, ResponseErr>;
+pub enum ResponseErr {
+    Protocol(String),
+    Remote(String),
+}
+pub struct ResponseBody{
+    pub payload: Payload,
+    pub schema: String,
 }

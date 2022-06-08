@@ -1,19 +1,20 @@
 [package]
+edition = "2021"
 name = "rmb-sdk"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0.57"
+async-stream = "0.3.3"
+async-trait = "0.1.53"
+base64 = "0.13.0"
+bb8-redis = "0.11.0"
+futures = "0.3.21"
 serde = {version = "1.0.136", features = ["derive"]}
 serde_json = {version = "1.0.81"}
-bb8-redis = "0.11.0"
-base64 = "0.13.0"
-async-stream = "0.3.3"
 tokio = {version = "1", features = ["full"]}
-futures = "0.3.21"
 uuid = "1.1.1"
 
 [dev-dependencies]
