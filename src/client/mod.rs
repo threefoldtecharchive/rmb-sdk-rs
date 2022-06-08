@@ -1,40 +1,15 @@
 pub mod request;
 pub mod response;
 
-use std::pin::Pin;
-
+use crate::util::Queue;
 use anyhow::{Context, Result};
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
     redis::AsyncCommands,
     RedisConnectionManager,
 };
-use futures::Stream;
 use request::Request;
 use response::Response;
-use uuid::Uuid;
-
-use crate::msg::Message;
-
-enum Queue {
-    Local,
-    Reply,
-}
-
-impl AsRef<str> for Queue {
-    fn as_ref(&self) -> &str {
-        match self {
-            Queue::Local => "msgbus.system.local",
-            Queue::Reply => "msgbus.system.reply",
-        }
-    }
-}
-
-impl std::fmt::Display for Queue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_ref())
-    }
-}
 
 pub struct Client {
     pool: Pool<RedisConnectionManager>,
@@ -55,17 +30,18 @@ impl Client {
         Ok(conn)
     }
 
-    pub async fn request(
-        &self,
-        req: Request,
-    ) -> Result<Pin<Box<impl Stream<Item = Result<Message>>>>> {
+    pub async fn send(&self, req: Request) -> Result<Response> {
         let mut conn = self.get_connection().await?;
         conn.rpush(Queue::Local.as_ref(), req.body())
             .await
             .context("unable to send your message")?;
 
-        let ret_queue = Uuid::new_v4().to_string();
-        let response = Box::pin(Response::new(self.pool.clone()).response(ret_queue));
+        let response = Response::new(
+            self.pool.clone(),
+            req.get_ret().to_owned(),
+            req.destinations_len(),
+            req.calc_deadline(),
+        );
 
         Ok(response)
     }

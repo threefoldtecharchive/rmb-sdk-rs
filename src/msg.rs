@@ -1,7 +1,7 @@
-use std::time::SystemTime;
-
+use crate::util;
 use bb8_redis::redis;
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Message {
@@ -63,10 +63,7 @@ impl Message {
     }
 
     pub fn set_now(&mut self) {
-        let ts = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        self.now = ts.as_secs();
+        self.now = util::timestamp() as u64;
     }
 }
 
