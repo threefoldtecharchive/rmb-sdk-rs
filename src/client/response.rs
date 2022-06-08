@@ -1,4 +1,3 @@
-
 use crate::msg::Message;
 use crate::util;
 
@@ -55,11 +54,11 @@ impl Response {
         };
         self.response_num -= 1;
 
-
         let payload = if let Some(err) = msg.error {
             Err(ResponseErr::Remote(err))
         } else {
-            let data = base64::decode(msg.data).with_context(|| "can not decode the received response");
+            let data =
+                base64::decode(msg.data).with_context(|| "can not decode the received response");
 
             if let Err(err) = data {
                 Err(ResponseErr::Protocol(err.to_string()))
@@ -68,7 +67,10 @@ impl Response {
             }
         };
 
-        Ok(Some(ResponseBody { payload, schema: msg.schema }))
+        Ok(Some(ResponseBody {
+            payload,
+            schema: msg.schema,
+        }))
     }
 }
 
@@ -77,7 +79,7 @@ pub enum ResponseErr {
     Protocol(String),
     Remote(String),
 }
-pub struct ResponseBody{
+pub struct ResponseBody {
     pub payload: Payload,
     pub schema: String,
 }
