@@ -103,7 +103,7 @@ mod tests {
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
 
     use super::*;
-    async fn create_rmb_client<'a>() -> Client {
+    async fn _create_rmb_client<'a>() -> Client {
         let manager = RedisConnectionManager::new("redis://127.0.0.1/")
             .context("unable to create redis connection manager")
             .unwrap();
