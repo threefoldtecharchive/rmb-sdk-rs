@@ -1,6 +1,7 @@
 mod client;
 mod msg;
 mod server;
+mod util;
 
 pub use client::{request::Request, Client};
 pub use server::Server;
@@ -100,9 +101,6 @@ mod tests {
 
     use anyhow::Context;
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
-    use futures::{Stream, StreamExt};
-
-    use crate::msg::Message;
 
     use super::*;
     async fn create_rmb_client<'a>() -> Client {
@@ -119,60 +117,27 @@ mod tests {
         client
     }
 
-    fn create_test_msg() -> Message {
-        let mut msg = Message::default();
-        // msg.id = uuid::Uuid::new_v4().to_string();
-        msg.destination = vec![55];
-        msg.command = "test".to_string();
-        msg.data = "some test data".to_string();
-        msg.retry = 1;
-        msg.source = 55;
-        msg.expiration = 1000;
-
-        msg
-    }
-
     #[tokio::test]
     async fn test_whole_process() {
-
-
         let client = create_rmb_client().await;
 
+        let args = [1, 2];
+
         // create request
-        let req = Request::new("calc.add").args([1, 2]).destination(55);
+        let req = Request::new("calc.add").args(args).destination(55);
 
         // send it
-        let mut resp = client.request(req).await.unwrap();
+        let mut resp = client.send(req).await.unwrap();
 
-        // this will work in a separate thread or just in a loop
-        loop {
-            while let Some(value) = resp.next().await {
-                match value {
-                    Ok(msg) => {}
-                    Err(err) => {}
+        // get response
+        while let Some(value) = resp.get().await {
+            match value {
+                Ok(resp) => {
+                    let resp = resp.body().to_string();
                 }
+                Err(err) => {}
             }
         }
 
-        // //send the message [cmd]
-        // client.send(&msg).await.unwrap();
-        // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-        // // get the cmd [message]
-        // let mut cmd = client.cmd("test").await.unwrap();
-        // let rep = uuid::Uuid::new_v4().to_string();
-        // cmd.reply = rep.clone();
-        // // assert that the data is the same
-        // assert_eq!(msg.data, cmd.data);
-
-        // // reply
-        // cmd.data = "return response".to_string();
-        // client.reply(rep.clone(), &cmd).await.unwrap();
-        // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-        // // get the response
-        // let received_msg = client.response(rep).await.unwrap();
-
-        // assert_eq!(cmd.data, received_msg.data);
     }
 }

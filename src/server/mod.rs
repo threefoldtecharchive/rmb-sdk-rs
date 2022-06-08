@@ -1,26 +1,33 @@
+
 use anyhow::{Context, Result};
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
     redis::{AsyncCommands, RedisResult},
     RedisConnectionManager,
 };
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, time::Duration};
 
-use crate::msg::Message;
+use crate::{msg::Message, util};
 
-pub struct Server<C, F>
-where
-    C: ToString,
-    F: Fn(String),
-{
-    pool: Pool<RedisConnectionManager>,
-    channels: HashMap<C, F>,
+
+type Cmd = String;
+
+pub struct CmdArgs {
+    pub data: String,
+    pub schema: String,
 }
 
-impl<C, F> Server<C, F>
+pub struct Server<F>
 where
-    C: ToString + Eq + Hash,
-    F: Fn(String),
+    F: Fn(CmdArgs),
+{
+    pool: Pool<RedisConnectionManager>,
+    channels: HashMap<Cmd, F>,
+}
+
+impl<F> Server<F>
+where
+    F: Fn(CmdArgs) + Clone,
 {
     pub fn new(pool: Pool<RedisConnectionManager>) -> Self {
         let channels = HashMap::new();
@@ -37,25 +44,27 @@ where
         Ok(conn)
     }
 
-    pub fn add_channel(mut self, cmd: C, handler: F) -> Self {
-        self.channels.insert(cmd, handler);
+    pub fn add_channel(mut self, cmd: Cmd, handler: F) -> Self {
+        let key = format!("msgbus.{}", cmd);
+        self.channels.insert(key, handler);
         self
     }
 
-    pub async fn exec(&self) -> Result<()> {
+    pub async fn exec(self) -> Result<()> {
         let mut conn = self.get_connection().await?;
+        let keys: Vec<String> = self.channels.clone().into_keys().by_ref().collect();
+        let timeout = util::timestamp() + Duration::from_secs(100).as_secs() as usize;
         loop {
-            for (cmd, handler) in self.channels.iter() {
-                let msg_res: RedisResult<Message> =
-                    conn.lpop(format!("msgbus.{}", cmd.to_string()), None).await;
+                let msg_res: RedisResult<(String, Message)> = conn.brpop(&keys, timeout).await;
 
-                if let Ok(msg) = msg_res {
+                if let Ok((list, msg)) = msg_res {
                     // decode an encoded data by me which will not panic
-                    let args = base64::decode(msg.data).unwrap();
-                    let args = String::from_utf8(args).unwrap();
-                    let reply = handler(args);
+                    let data = base64::decode(msg.data).unwrap();
+                    let data = String::from_utf8(data).unwrap();
+                    let handler = self.channels.get(&list).unwrap();
+                    let cmd_args = CmdArgs { data, schema: msg.schema };
+                    let reply = handler(cmd_args);
                 }
-            }
         }
     }
 
