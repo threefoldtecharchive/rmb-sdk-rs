@@ -11,7 +11,7 @@ pub use server::Server;
 // use bb8_redis::{
 //     bb8::{Pool, PooledConnection},
 //     redis::AsyncCommands,
-//     RedisConnectionManager,
+//     RedisConnec&mut &mut tionManager,
 // };
 // use msg::Message;
 
@@ -102,6 +102,10 @@ mod tests {
     use anyhow::Context;
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
 
+    use crate::server::CmdArgs;
+    use crate::server::Router;
+    use crate::server::ServiceModule;
+
     use super::*;
     async fn _create_rmb_client<'a>() -> Client {
         let manager = RedisConnectionManager::new("redis://127.0.0.1/")
@@ -116,27 +120,55 @@ mod tests {
 
         client
     }
+    async fn create_rmb_server<P, R, M: Into<String>>(
+        modname: M,
+        router: ServiceModule<P, R>,
+    ) -> Server<P, R> {
+        let manager = RedisConnectionManager::new("redis://127.0.0.1/")
+            .context("unable to create redis connection manager")
+            .unwrap();
+        let pool = Pool::builder()
+            .build(manager)
+            .await
+            .context("unable to build pool or redis connection manager")
+            .unwrap();
+        let server = Server::new(pool, modname, router);
+
+        server
+    }
+
+    /* async */
+    fn add(_args: CmdArgs) {}
+    /* async */
+    fn mul(_args: CmdArgs) {}
+    /* async */
+    fn div(_args: CmdArgs) {}
+
+    /* async */
+    fn sub(_args: CmdArgs) {}
+    /* async */
+    fn version(_args: CmdArgs) {}
 
     #[tokio::test]
     async fn test_whole_process() {
-        // let client = create_rmb_client().await;
+        let basic_mod: ServiceModule<CmdArgs, ()> = ServiceModule::new(None)
+            .submodule("add", Some(add))
+            .submodule("mul", Some(mul))
+            .submodule("div", Some(div))
+            .submodule("sub", Some(sub));
 
-        // let args = [1, 2];
+        let scientific: ServiceModule<CmdArgs, ()> = ServiceModule::new(None)
+            .submodule("add", Some(add))
+            .submodule("mul", Some(mul))
+            .submodule("div", Some(div))
+            .submodule("sub", Some(sub));
 
-        // // create request
-        // let req = Request::new("calc.add").args(args).destination(55);
+        let calc = ServiceModule::new(Some(version))
+            .attach("basic", basic_mod)
+            .attach("scientific", scientific);
 
-        // // send it
-        // let mut resp = client.send(req).await.unwrap();
+        let _server = create_rmb_server("calculator", calc).await;
 
-        // // get response
-        // while let Some(value) = resp.get().await {
-        //     match value {
-        //         Ok(resp) => {
-        //             let resp = resp.body().to_string();
-        //         }
-        //         Err(err) => {}
-        //     }
-        // }
+        println!("{:#?}", _server);
     }
 }
