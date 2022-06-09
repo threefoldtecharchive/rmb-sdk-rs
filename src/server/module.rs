@@ -1,7 +1,9 @@
 use std::collections::HashMap;
-type Handler<P, R> = fn(P) -> R;
+pub type Handler<P, R> = fn(P) -> R;
 pub trait Router<P, R> {
-    fn handle<S: Into<String>>(&mut self, submod: S, handler: Option<Handler<P, R>>) -> &Self;
+    fn attach<S: Into<String>>(self, submod: S, router: Self) -> Self;
+    fn submodule<S: AsRef<str>>(self, submod: S, handler: Option<Handler<P, R>>) -> Self;
+    fn handle<S: AsRef<str>>(self, handler: Handler<P, R>) -> Self;
 }
 
 #[derive(Debug)]
@@ -66,17 +68,36 @@ impl<P, R> ServiceModule<P, R> {
 }
 
 impl<P, R> Router<P, R> for ServiceModule<P, R> {
-    fn handle<S: Into<String>>(&mut self, submod: S, handler: Option<Handler<P, R>>) -> &Self {
-        let m = Self::new(handler);
+    fn submodule<S: AsRef<str>>(mut self, submod: S, handler: Option<Handler<P, R>>) -> Self {
+        let m = Self {
+            handle: handler,
+            subs: None,
+        };
 
         if self.subs.is_none() {
             self.subs = Some(HashMap::new());
         }
 
         if let Some(subs) = self.subs.as_mut() {
-            subs.insert(submod.into().to_string(), m);
+            subs.insert(submod.as_ref().to_string(), m);
         }
 
         self
     }
+
+    fn handle<S: AsRef<str>>(mut self, handler: Handler<P, R>) -> Self {
+        self.handle = Some(handler);
+        self
+    }
+
+    fn attach<S: Into<String>>(mut self, submod: S, router: Self) -> Self {
+        if self.subs.is_none() {
+            self.subs = Some(HashMap::new());
+        }
+
+        let subs = self.subs.as_mut().unwrap();
+        subs.insert(submod.into(), router);
+        self
+    }
+
 }

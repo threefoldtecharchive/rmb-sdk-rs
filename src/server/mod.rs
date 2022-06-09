@@ -6,19 +6,21 @@ use bb8_redis::{
     redis::{AsyncCommands, RedisResult},
     RedisConnectionManager,
 };
-use module::*;
+pub use module::*;
 use std::time::Duration;
 
 use crate::{msg::Message, util};
 
 // type Cmd = String;
-type Handler<P, R> = fn(P) -> R;
+// type Handler<P, R> = fn(P) -> R;
 
+#[derive(Debug)]
 pub struct CmdArgs {
     pub data: String,
     pub schema: String,
 }
 
+#[derive(Debug)]
 pub struct Server<P, R> {
     pool: Pool<RedisConnectionManager>,
     // channels: HashMap<Cmd, Handler<P, R>>,
@@ -26,24 +28,17 @@ pub struct Server<P, R> {
     module: ServiceModule<P, R>,
 }
 
-impl<P, R> Router<P, R> for Server<P, R> {
-    fn handle<S: Into<String>>(&mut self, submod: S, handler: Option<Handler<P, R>>) -> &Self {
-        self.module.handle(submod.into(), handler);
-        self
-    }
-}
-
 impl<P, R> Server<P, R> {
-    pub fn new<M: Into<String>>(pool: Pool<RedisConnectionManager>, modname: M) -> Self {
+    pub fn new<N: Into<String>>(
+        pool: Pool<RedisConnectionManager>,
+        name: N,
+        module: ServiceModule<P, R>,
+    ) -> Self {
         Self {
             pool,
-            name: modname.into(),
-            module: ServiceModule::new(None),
+            name: name.into(),
+            module,
         }
-    }
-
-    pub fn submodule<S: Into<String>>(&mut self, submod: S) -> &impl Router<P, R> {
-        self.module.handle(submod.into(), None)
     }
 
     async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
