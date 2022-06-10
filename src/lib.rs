@@ -102,9 +102,8 @@ mod tests {
     use anyhow::Context;
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
 
-    use crate::server::CmdArgs;
-    use crate::server::Router;
-    use crate::server::ServiceModule;
+    use crate::server::{HandlerInput, HandlerOutput};
+    use crate::server::{Router, Server};
 
     use super::*;
     async fn _create_rmb_client<'a>() -> Client {
@@ -120,10 +119,7 @@ mod tests {
 
         client
     }
-    async fn create_rmb_server<P, R, M: Into<String>>(
-        modname: M,
-        router: ServiceModule<P, R>,
-    ) -> Server<P, R> {
+    async fn create_rmb_server() -> Server {
         let manager = RedisConnectionManager::new("redis://127.0.0.1/")
             .context("unable to create redis connection manager")
             .unwrap();
@@ -132,43 +128,60 @@ mod tests {
             .await
             .context("unable to build pool or redis connection manager")
             .unwrap();
-        let server = Server::new(pool, modname, router);
+
+        let server = Server::new(pool);
 
         server
     }
 
     /* async */
-    fn add(_args: CmdArgs) {}
-    /* async */
-    fn mul(_args: CmdArgs) {}
-    /* async */
-    fn div(_args: CmdArgs) {}
+    fn add(_args: HandlerInput) -> HandlerOutput {
+        unimplemented!()
+    }
+    fn mul(_args: HandlerInput) -> HandlerOutput {
+        unimplemented!()
+    }
+    fn div(_args: HandlerInput) -> HandlerOutput {
+        unimplemented!()
+    }
+    fn sub(_args: HandlerInput) -> HandlerOutput {
+        unimplemented!()
+    }
+    fn sqr(_args: HandlerInput) -> HandlerOutput {
+        unimplemented!()
+    }
+    fn version(_args: HandlerInput) -> HandlerOutput {
+        unimplemented!()
+    }
 
-    /* async */
-    fn sub(_args: CmdArgs) {}
-    /* async */
-    fn version(_args: CmdArgs) {}
+    fn build_deep<M: Router>(router: &mut M) {
+        // we can pass a ref to a router. and fill it
+        // up with handler and or even more sub modules.
+        router.handle("test", sub);
+    }
 
     #[tokio::test]
     async fn test_whole_process() {
-        let basic_mod: ServiceModule<CmdArgs, ()> = ServiceModule::new(None)
-            .submodule("add", Some(add))
-            .submodule("mul", Some(mul))
-            .submodule("div", Some(div))
-            .submodule("sub", Some(sub));
+        let mut server = create_rmb_server().await;
+        server.handle("version", version);
 
-        let scientific: ServiceModule<CmdArgs, ()> = ServiceModule::new(None)
-            .submodule("add", Some(add))
-            .submodule("mul", Some(mul))
-            .submodule("div", Some(div))
-            .submodule("sub", Some(sub));
+        let calculator = server.module("calculator");
+        calculator
+            .handle("add", add)
+            .handle("mul", mul)
+            .handle("div", div);
 
-        let calc = ServiceModule::new(Some(version))
-            .attach("basic", basic_mod)
-            .attach("scientific", scientific);
+        let scientific = server.module("scientific");
+        scientific.handle("sqr", sqr);
 
-        let _server = create_rmb_server("calculator", calc).await;
+        // extend modules that is already there. and pass them around
+        let deep = server.module("calculator").module("deep");
+        build_deep(deep);
 
-        println!("{:#?}", _server);
+        assert!(matches!(server.lookup("version"), Some(_)));
+        assert!(matches!(server.lookup("calculator.add"), Some(_)));
+        assert!(matches!(server.lookup("scientific.sqr"), Some(_)));
+        assert!(matches!(server.lookup("calculator.wrong"), None));
+        assert!(matches!(server.lookup("calculator.deep.test"), Some(_)));
     }
 }
