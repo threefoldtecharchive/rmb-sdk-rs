@@ -58,6 +58,7 @@ impl Router for Module {
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Module {
         let name = name.into();
+        assert!(!name.contains("."), "module name cannot contain a dot");
         self.modules
             .entry(name.clone())
             .or_insert_with(|| Module::new())
@@ -65,6 +66,7 @@ impl Router for Module {
 
     fn handle<S: Into<String>>(&mut self, name: S, handler: super::Handler) -> &mut Self {
         let name = name.into();
+        assert!(!name.contains("."), "module name cannot contain a dot");
         if self.handlers.contains_key(&name) {
             panic!("double registration of same function: {}", name);
         }
