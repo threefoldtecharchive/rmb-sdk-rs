@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
+use workers::WorkerPool;
 
-use super::{Handler, HandlerInput, Router};
+use super::{Handler, HandlerInput, Router, work_runner::WorkRunner};
 use crate::msg::Message;
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
     redis::{AsyncCommands, RedisResult},
     RedisConnectionManager,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, time::Duration, borrow::BorrowMut, cell::{Cell, RefCell}, rc::Rc};
 use std::iter::Iterator;
 
 pub struct Module {
@@ -79,6 +80,7 @@ impl Router for Module {
 pub struct Server {
     root: Module,
     pool: Pool<RedisConnectionManager>,
+    workers: WorkerPool<Arc<WorkRunner>>,
 }
 
 impl Router for Server {
@@ -95,10 +97,12 @@ impl Router for Server {
 }
 
 impl Server {
-    pub fn new(pool: Pool<RedisConnectionManager>) -> Self {
+    pub fn new(pool: Pool<RedisConnectionManager>, workers_size: usize) -> Self {
+        let workers = WorkerPool::new(Arc::new(WorkRunner::new(pool.clone())), workers_size);
         Self {
             root: Module::new(),
             pool: pool,
+            workers
         }
     }
 
@@ -120,10 +124,13 @@ impl Server {
         Ok(conn)
     }
 
-    pub async fn run(self) -> Result<()> {
-        let mut conn = self.get_connection().await?;
+    pub async fn run(mut self) -> Result<()> {
+        
         let keys = self.root.functions();
         loop {
+            let worker_handler = self.workers.get().await;
+            let mut conn = self.get_connection().await?;
+
             let msg_res: RedisResult<(String, Message)> = conn.brpop(&keys, 0).await;
 
             if let Ok((command, msg)) = msg_res {
@@ -139,6 +146,8 @@ impl Server {
                     data: data,
                     schema: msg.schema,
                 });
+
+
 
                 // todo:
                 // - handler is not async. hence

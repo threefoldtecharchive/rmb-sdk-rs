@@ -1,3 +1,6 @@
+mod builder;
+
+pub use builder::*;
 use crate::util;
 use bb8_redis::redis;
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,5 @@
 mod server;
+mod work_runner;
 
 pub use server::{Module, Server};
 
