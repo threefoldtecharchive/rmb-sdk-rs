@@ -1,5 +1,6 @@
 mod server;
 
+pub use handler::handler;
 pub use server::{Module, Server};
 
 #[derive(Debug)]
@@ -14,11 +15,14 @@ pub struct HandlerOutput {
     pub schema: String,
 }
 
-type Handler = fn(HandlerInput) -> HandlerOutput;
+#[async_trait::async_trait]
+pub trait Handler: 'static {
+    async fn call(&self, input: HandlerInput) -> HandlerOutput;
+}
 
 pub trait Router {
     type Module: Router;
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module;
-    fn handle<S: Into<String>>(&mut self, name: S, handler: Handler) -> &mut Self;
+    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler) -> &mut Self;
 }
