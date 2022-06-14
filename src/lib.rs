@@ -3,13 +3,13 @@ mod msg;
 mod server;
 mod util;
 
-pub use client::{request::Request, Client};
+pub use client::Client;
 pub use server::{handler, Handler, Server};
 
 #[cfg(test)]
 mod tests {
 
-    use anyhow::Context;
+    use anyhow::{Context, Result};
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
 
     use crate::server::{HandlerInput, HandlerOutput};
@@ -39,43 +39,43 @@ mod tests {
             .context("unable to build pool or redis connection manager")
             .unwrap();
 
-        let server = Server::new(pool);
+        let server = Server::new(pool, 20);
 
         server
     }
 
     /* async */
     #[handler]
-    async fn add(_args: HandlerInput) -> HandlerOutput {
+    async fn add(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn mul(_args: HandlerInput) -> HandlerOutput {
+    async fn mul(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn div(_args: HandlerInput) -> HandlerOutput {
+    async fn div(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn sub(_args: HandlerInput) -> HandlerOutput {
+    async fn sub(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn sqr(_args: HandlerInput) -> HandlerOutput {
+    async fn sqr(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn version(_args: HandlerInput) -> HandlerOutput {
+    async fn version(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    async fn build_deep<M: Router>(router: &mut M) {
+    fn build_deep<M: Router>(router: &mut M) {
         // we can pass a ref to a router. and fill it
         // up with handler and or even more sub modules.
         router.handle("test", sub);

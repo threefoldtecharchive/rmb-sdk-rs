@@ -1,5 +1,8 @@
+mod builder;
+
 use crate::util;
 use bb8_redis::redis;
+pub use builder::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

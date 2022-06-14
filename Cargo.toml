@@ -12,11 +12,12 @@ async-trait = "0.1.53"
 base64 = "0.13.0"
 bb8-redis = "0.11.0"
 futures = "0.3.21"
+log = "0.4"
 serde = {version = "1.0.136", features = ["derive"]}
 serde_json = {version = "1.0.81"}
 tokio = {version = "1", features = ["full"]}
-uuid = "1.1.1"
-handler = { path="handler" }
+uuid = {version = "1.1.0", features = ["v4"]}
+workers = {git = "https://github.com/threefoldtech/tokio-worker-pool", branch = "main"}
+handler = {path="handler"}
 
 [dev-dependencies]
-uuid = {version = "1.1.0", features = ["v4"]}

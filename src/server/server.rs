@@ -1,14 +1,16 @@
 use anyhow::{Context, Result};
+use workers::WorkerPool;
 
-use super::{Handler, HandlerInput, Router};
+use super::{work_runner::WorkRunner, Handler, Router};
 use crate::msg::Message;
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
     redis::{AsyncCommands, RedisResult},
     RedisConnectionManager,
 };
-use std::collections::HashMap;
 use std::iter::Iterator;
+use std::{collections::HashMap, sync::Arc};
+use tokio::time::{sleep, Duration};
 
 pub struct Module {
     modules: HashMap<String, Module>,
@@ -41,7 +43,7 @@ impl Module {
     }
 
     /// return all registered keys
-    fn functions(&self) -> Vec<String> {
+    pub fn functions(&self) -> Vec<String> {
         // todo!: implement with iterators instead
 
         let mut fns: Vec<String> = self.handlers.keys().map(|k| k.to_owned()).collect();
@@ -77,8 +79,9 @@ impl Router for Module {
 }
 
 pub struct Server {
-    root: Module,
     pool: Pool<RedisConnectionManager>,
+    root: Module,
+    workers: usize,
 }
 
 impl Router for Server {
@@ -95,58 +98,45 @@ impl Router for Server {
 }
 
 impl Server {
-    pub fn new(pool: Pool<RedisConnectionManager>) -> Self {
+    pub fn new(pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
         Self {
+            pool,
             root: Module::new(),
-            pool: pool,
+            workers,
         }
     }
 
-    pub fn functions(&self) -> Vec<String> {
-        self.root.functions()
-    }
-
-    pub fn lookup<S: AsRef<str>>(&self, cmd: S) -> Option<&Box<dyn Handler>> {
-        self.root.lookup(cmd)
-    }
-
-    async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
-        let conn = self
-            .pool
-            .get()
-            .await
-            .context("unable to retrieve a redis connection from the pool")?;
-
-        Ok(conn)
+    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler>> {
+        self.root.lookup(path)
     }
 
     pub async fn run(self) -> Result<()> {
-        let mut conn = self.get_connection().await?;
+        let pool = self.pool;
         let keys = self.root.functions();
+        let runner = WorkRunner::new(pool.clone(), self.root);
+        let mut workers = WorkerPool::new(Arc::new(runner), self.workers);
         loop {
-            let msg_res: RedisResult<(String, Message)> = conn.brpop(&keys, 0).await;
+            let worker_handler = workers.get().await;
+            let mut conn = match pool.get().await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    log::error!("failed to get redis connection: {}", err);
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
 
-            if let Ok((command, msg)) = msg_res {
-                // decode an encoded data by me which will not panic
-                let data = base64::decode(msg.data).unwrap(); // <- not safe
-                let handler = self
-                    .root
-                    .lookup(command)
-                    .context("handler not found this should never happen")
-                    .unwrap();
+            let (command, message): (String, Message) = match conn.brpop(&keys, 0).await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    log::error!("failed to get next command: {}", err);
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
 
-                let _out = handler
-                    .call(HandlerInput {
-                        data: data,
-                        schema: msg.schema,
-                    })
-                    .await;
-
-                // todo:
-                // - handler is not async. hence
-                //  - you can only process single command at a time
-                //  - you cannot control number of workers.
-                //  - handler code can't do async work
+            if let Err(err) = worker_handler.send((command, message)) {
+                log::debug!("can not send job to worker because of '{}'", err);
             }
         }
     }

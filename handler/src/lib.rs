@@ -17,7 +17,7 @@ pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
         #[async_trait::async_trait]
         impl Handler for #name {
-            async fn call(&self, input: HandlerInput) -> HandlerOutput {
+            async fn call(&self, input: HandlerInput) -> Result<HandlerOutput> {
                 #input
 
                 #name(input).await
