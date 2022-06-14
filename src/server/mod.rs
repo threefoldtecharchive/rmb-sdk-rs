@@ -18,13 +18,19 @@ pub struct HandlerOutput {
 }
 
 #[async_trait::async_trait]
-pub trait Handler: Send + Sync + 'static {
-    async fn call(&self, input: HandlerInput) -> Result<HandlerOutput>;
+pub trait Handler<D>: 'static
+where
+    D: 'static,
+{
+    async fn call(&self, data: D, input: HandlerInput) -> Result<HandlerOutput>;
 }
 
-pub trait Router {
-    type Module: Router;
+pub trait Router<D>
+where
+    D: 'static,
+{
+    type Module: Router<D>;
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module;
-    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler) -> &mut Self;
+    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self;
 }

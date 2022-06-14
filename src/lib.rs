@@ -29,7 +29,7 @@ mod tests {
 
         client
     }
-    async fn create_rmb_server() -> Server {
+    async fn create_rmb_server() -> Server<AppData> {
         let manager = RedisConnectionManager::new("redis://127.0.0.1/")
             .context("unable to create redis connection manager")
             .unwrap();
@@ -44,38 +44,43 @@ mod tests {
         server
     }
 
+    #[derive(Clone)]
+    struct AppData {}
+
+    #[derive(Clone)]
+    struct AppData2 {}
     /* async */
     #[handler]
-    async fn add(_args: HandlerInput) -> Result<HandlerOutput> {
+    async fn add(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn mul(_args: HandlerInput) -> Result<HandlerOutput> {
+    async fn mul(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn div(_args: HandlerInput) -> Result<HandlerOutput> {
+    async fn div(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn sub(_args: HandlerInput) -> Result<HandlerOutput> {
+    async fn sub(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn sqr(_args: HandlerInput) -> Result<HandlerOutput> {
+    async fn sqr(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
     #[handler]
-    async fn version(_args: HandlerInput) -> Result<HandlerOutput> {
+    async fn version(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    fn build_deep<M: Router>(router: &mut M) {
+    fn build_deep<M: Router<AppData>>(router: &mut M) {
         // we can pass a ref to a router. and fill it
         // up with handler and or even more sub modules.
         router.handle("test", sub);

@@ -12,12 +12,12 @@ use std::iter::Iterator;
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::{sleep, Duration};
 
-pub struct Module {
-    modules: HashMap<String, Module>,
-    handlers: HashMap<String, Box<dyn Handler>>,
+pub struct Module<D> {
+    modules: HashMap<String, Module<D>>,
+    handlers: HashMap<String, Box<dyn Handler<D>>>,
 }
 
-impl Module {
+impl<D> Module<D> {
     fn new() -> Self {
         Self {
             modules: HashMap::default(),
@@ -25,13 +25,13 @@ impl Module {
         }
     }
 
-    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler>> {
+    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler<D>>> {
         let parts: Vec<&str> = path.as_ref().split(".").collect();
 
         self.lookup_parts(&parts)
     }
 
-    fn lookup_parts(&self, parts: &[&str]) -> Option<&Box<dyn Handler>> {
+    fn lookup_parts(&self, parts: &[&str]) -> Option<&Box<dyn Handler<D>>> {
         match parts.len() {
             0 => None,
             1 => self.handlers.get(parts[0]),
@@ -55,10 +55,13 @@ impl Module {
     }
 }
 
-impl Router for Module {
-    type Module = Module;
+impl<D> Router<D> for Module<D>
+where
+    D: 'static,
+{
+    type Module = Module<D>;
 
-    fn module<S: Into<String>>(&mut self, name: S) -> &mut Module {
+    fn module<S: Into<String>>(&mut self, name: S) -> &mut Module<D> {
         let name = name.into();
         assert!(!name.contains("."), "module name cannot contain a dot");
         self.modules
@@ -66,7 +69,7 @@ impl Router for Module {
             .or_insert_with(|| Module::new())
     }
 
-    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler) -> &mut Self {
+    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self {
         let name = name.into();
         assert!(!name.contains("."), "module name cannot contain a dot");
         if self.handlers.contains_key(&name) {
@@ -78,36 +81,40 @@ impl Router for Module {
     }
 }
 
-pub struct Server {
+pub struct Server<D> {
     pool: Pool<RedisConnectionManager>,
     root: Module,
     workers: usize,
+    data: D,
 }
 
-impl Router for Server {
-    type Module = Module;
+impl<D> Router<D> for Server<D>
+where
+    D: 'static,
+{
+    type Module = Module<D>;
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module {
         self.root.module(name)
     }
 
-    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler) -> &mut Self {
+    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self {
         self.root.handle(name, handler);
         self
     }
 }
 
-impl Server {
-    pub fn new(pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
+impl<D> Server<D>
+where
+    D: Clone + 'static,
+{
+    pub fn new(data: D, pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
         Self {
             pool,
             root: Module::new(),
-            workers,
+            data,
+	    workers,
         }
-    }
-
-    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler>> {
-        self.root.lookup(path)
     }
 
     pub async fn run(self) -> Result<()> {
@@ -126,14 +133,14 @@ impl Server {
                 }
             };
 
-            let (command, message): (String, Message) = match conn.brpop(&keys, 0).await {
-                Ok(resp) => resp,
-                Err(err) => {
-                    log::error!("failed to get next command: {}", err);
-                    sleep(Duration::from_secs(2)).await;
-                    continue;
-                }
-            };
+            if let Ok((command, msg)) = msg_res {
+                // decode an encoded data by me which will not panic
+                let data = base64::decode(msg.data).unwrap(); // <- not safe
+                let handler = self
+                    .root
+                    .lookup(command)
+                    .context("handler not found this should never happen")
+                    .unwrap();
 
             if let Err(err) = worker_handler.send((command, message)) {
                 log::debug!("can not send job to worker because of '{}'", err);
