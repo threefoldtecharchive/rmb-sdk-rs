@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, Type};
+use syn::{parse_macro_input, FnArg, ItemFn};
 
 #[proc_macro_attribute]
 pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
@@ -11,29 +11,19 @@ pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     let args = &input.sig.inputs;
-    assert_eq!(args.len(), 2, "invalid number of arguments expecting two");
+    if args.len() != 2 {
+        panic!("handler must accept two arguments (D, HandlerInput)");
+    }
 
-    let data = match args.first() {
-        None => {
-            panic!("require 2 arguments");
-        }
-        Some(data) => match data {
-            FnArg::Typed(ty) => ty,
-            _ => {
-                panic!("invalid argument type expected struct")
-            }
-        },
+    let data = if let Some(FnArg::Typed(ref ty)) = args.first() {
+        ty
+    } else {
+        panic!("app data type missing");
     };
 
-    let p = match *data.ty {
-        Type::Path(ref p) => p,
-        _ => {
-            panic!("expecting struct data");
-        }
-    };
+    let p = &data.ty;
 
     let name = &input.sig.ident;
-    let d = &p.path;
     let out = quote! {
 
         #[allow(non_camel_case_types)]
@@ -41,8 +31,9 @@ pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
         #[async_trait::async_trait]
 ==== BASE ====
-        impl Handler for #name {
-            async fn call(&self, input: HandlerInput) -> Result<HandlerOutput> {
+        impl Handler<#d> for #name
+        {
+            async fn call(&self, data: #d, input: HandlerInput) -> Result<HandlerOutput> {
 ==== BASE ====
                 #input
 

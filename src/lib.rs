@@ -1,19 +1,19 @@
-mod client;
+pub mod client;
 mod msg;
-mod server;
+pub mod server;
 mod util;
 
-pub use client::Client;
-pub use server::{handler, Handler, Server};
+pub use client::{Client};
 
 #[cfg(test)]
 mod tests {
+    use handler::handler;
+    use server::{Handler, Router, Server};
 
     use anyhow::{Context, Result};
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
 
     use crate::server::{HandlerInput, HandlerOutput};
-    use crate::server::{Router, Server};
 
     use super::*;
     async fn _create_rmb_client<'a>() -> Client {
@@ -47,8 +47,6 @@ mod tests {
     #[derive(Clone)]
     struct AppData {}
 
-    #[derive(Clone)]
-    struct AppData2 {}
     /* async */
     #[handler]
     async fn add(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
