@@ -3,15 +3,13 @@ mod msg;
 mod server;
 mod util;
 
-use anyhow::Result;
-
-pub use client::{Client, Request};
-pub use server::Server;
+pub use client::Client;
+pub use server::{handler, Handler, Server};
 
 #[cfg(test)]
 mod tests {
 
-    use anyhow::Context;
+    use anyhow::{Context, Result};
     use bb8_redis::{bb8::Pool, RedisConnectionManager};
 
     use crate::server::{HandlerInput, HandlerOutput};
@@ -47,28 +45,33 @@ mod tests {
     }
 
     /* async */
-    fn add(args: HandlerInput) -> Result<HandlerOutput> {
+    #[handler]
+    async fn add(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    fn mul(_args: HandlerInput) -> Result<HandlerOutput> {
+    #[handler]
+    async fn mul(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    fn div(_args: HandlerInput) -> Result<HandlerOutput> {
-        anyhow::bail!("cannot divide by zero");
+    #[handler]
+    async fn div(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    fn sub(_args: HandlerInput) -> Result<HandlerOutput> {
+    #[handler]
+    async fn sub(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    fn sqr(_args: HandlerInput) -> Result<HandlerOutput> {
+    #[handler]
+    async fn sqr(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 
-    fn version(_args: HandlerInput) -> Result<HandlerOutput> {
+    #[handler]
+    async fn version(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 

@@ -9,24 +9,11 @@ use workers::Work;
 
 use crate::{msg::Message, util::Queue};
 
-use super::{Handler, HandlerInput, HandlerOutput, Module, Router};
+use super::{HandlerInput, HandlerOutput, Module};
 
 pub struct WorkRunner {
     pool: Pool<RedisConnectionManager>,
     root: Module,
-}
-
-impl Router for WorkRunner {
-    type Module = Module;
-
-    fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module {
-        self.root.module(name)
-    }
-
-    fn handle<S: Into<String>>(&mut self, name: S, handler: Handler) -> &mut Self {
-        self.root.handle(name, handler);
-        self
-    }
 }
 
 impl WorkRunner {
@@ -81,10 +68,12 @@ impl Work for WorkRunner {
             .context("handler not found this should never happen")
             .unwrap();
 
-        let out = handler(HandlerInput {
-            data: data,
-            schema: msg.schema.clone(),
-        });
+        let out = handler
+            .call(HandlerInput {
+                data: data,
+                schema: msg.schema.clone(),
+            })
+            .await;
 
         Self::prepare(&mut msg, out).await;
 
