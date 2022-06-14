@@ -3,6 +3,8 @@ mod msg;
 mod server;
 mod util;
 
+use anyhow::Result;
+
 pub use client::{Client, Request};
 pub use server::Server;
 
@@ -45,22 +47,28 @@ mod tests {
     }
 
     /* async */
-    fn add(_args: HandlerInput) -> HandlerOutput {
+    fn add(args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
-    fn mul(_args: HandlerInput) -> HandlerOutput {
+
+    fn mul(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
-    fn div(_args: HandlerInput) -> HandlerOutput {
+
+    fn div(_args: HandlerInput) -> Result<HandlerOutput> {
+        anyhow::bail!("cannot divide by zero");
         unimplemented!()
     }
-    fn sub(_args: HandlerInput) -> HandlerOutput {
+
+    fn sub(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
-    fn sqr(_args: HandlerInput) -> HandlerOutput {
+
+    fn sqr(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
-    fn version(_args: HandlerInput) -> HandlerOutput {
+
+    fn version(_args: HandlerInput) -> Result<HandlerOutput> {
         unimplemented!()
     }
 

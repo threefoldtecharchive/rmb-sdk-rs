@@ -10,6 +10,7 @@ use bb8_redis::{
 };
 use std::iter::Iterator;
 use std::{collections::HashMap, sync::Arc};
+use tokio::time::{sleep, Duration};
 
 pub struct Module {
     modules: HashMap<String, Module>,
@@ -79,7 +80,7 @@ impl Router for Module {
 
 pub struct Server {
     pool: Pool<RedisConnectionManager>,
-    runner: WorkRunner,
+    root: Module,
     workers: usize,
 }
 
@@ -87,70 +88,56 @@ impl Router for Server {
     type Module = Module;
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module {
-        self.runner.module(name)
+        self.root.module(name)
     }
 
     fn handle<S: Into<String>>(&mut self, name: S, handler: Handler) -> &mut Self {
-        self.runner.handle(name, handler);
+        self.root.handle(name, handler);
         self
     }
 }
 
 impl Server {
     pub fn new(pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
-        let runner = WorkRunner::new(pool.clone(), Module::new());
         Self {
             pool,
-            runner,
+            root: Module::new(),
             workers,
         }
     }
 
-    pub fn functions(&self) -> Vec<String> {
-        self.runner.functions()
-    }
-
-    pub fn lookup<S: AsRef<str>>(&self, cmd: S) -> Option<&Handler> {
-        self.runner.lookup(cmd)
-    }
-
-    async fn get_connection(
-        pool: &Pool<RedisConnectionManager>,
-    ) -> Result<PooledConnection<'_, RedisConnectionManager>> {
-        let conn = pool
-            .get()
-            .await
-            .context("unable to retrieve a redis connection from the pool")?;
-
-        Ok(conn)
+    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Handler> {
+        self.root.lookup(path)
     }
 
     pub async fn run(self) -> Result<()> {
-        let keys = self.functions();
-        let mut workers = WorkerPool::new(Arc::new(self.runner), self.workers);
+        let pool = self.pool;
+        let keys = self.root.functions();
+        let runner = WorkRunner::new(pool.clone(), self.root);
+        let mut workers = WorkerPool::new(Arc::new(runner), self.workers);
         loop {
             let worker_handler = workers.get().await;
-            let mut conn = Self::get_connection(&self.pool).await?;
-
-            let msg_res: RedisResult<(String, Message)> = conn.brpop(&keys, 0).await;
-
-            let (command, msg) = match msg_res {
-                Ok(msg) => msg,
+            let mut conn = match pool.get().await {
+                Ok(conn) => conn,
                 Err(err) => {
-                    log::debug!("redis error happened because of '{}'", err);
+                    log::error!("failed to get redis connection: {}", err);
+                    sleep(Duration::from_secs(2)).await;
                     continue;
                 }
             };
 
-            if let Err(err) = worker_handler.send((command, msg)) {
+            let (command, message): (String, Message) = match conn.brpop(&keys, 0).await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    log::error!("failed to get next command: {}", err);
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+
+            if let Err(err) = worker_handler.send((command, message)) {
                 log::debug!("can not send job to worker because of '{}'", err);
             }
-
-            // todo:
-            // - handler is not async. hence
-            //  - you can only process single command at a time
-            //  - you cannot control number of workers.
-            //  - handler code can't do async work
         }
     }
 }

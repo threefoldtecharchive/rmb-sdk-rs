@@ -34,6 +34,7 @@ impl WorkRunner {
         WorkRunner { pool, root: root }
     }
 
+    #[inline]
     async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
         let conn = self
             .pool
@@ -44,16 +45,13 @@ impl WorkRunner {
         Ok(conn)
     }
 
-    pub fn functions(&self) -> Vec<String> {
-        self.root.functions()
-    }
-
-    pub fn lookup<S: AsRef<str>>(&self, cmd: S) -> Option<&Handler> {
-        self.root.lookup(cmd)
-    }
-
-    async fn prepare(msg: &mut Message, result: HandlerOutput) {
-        msg.data = base64::encode(result.data);
+    async fn prepare(msg: &mut Message, result: Result<HandlerOutput>) {
+        match result {
+            Ok(result) => {
+                msg.data = base64::encode(result.data);
+            }
+            Err(err) => msg.error = Some(format!("{}", err)),
+        }
 
         let src = msg.source;
         msg.source = msg.destination[0];

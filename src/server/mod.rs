@@ -1,5 +1,6 @@
 mod server;
 mod work_runner;
+use anyhow::Result;
 
 pub use server::{Module, Server};
 
@@ -15,7 +16,7 @@ pub struct HandlerOutput {
     pub schema: String,
 }
 
-type Handler = fn(HandlerInput) -> HandlerOutput;
+type Handler = fn(HandlerInput) -> Result<HandlerOutput>;
 
 pub trait Router {
     type Module: Router;
