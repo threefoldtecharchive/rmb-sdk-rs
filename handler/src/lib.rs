@@ -10,6 +10,7 @@ pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
         panic!("supported only for async functions");
     }
 
+    let vis = &input.vis;
     let args = &input.sig.inputs;
     if args.len() != 2 {
         panic!("handler must accept two arguments (D, HandlerInput)");
@@ -27,7 +28,7 @@ pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let out = quote! {
 
         #[allow(non_camel_case_types)]
-        pub struct #name;
+        #vis struct #name;
 
         #[async_trait::async_trait]
 ==== BASE ====
