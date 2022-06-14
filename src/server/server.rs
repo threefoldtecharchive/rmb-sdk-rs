@@ -1,13 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use workers::WorkerPool;
 
 use super::{work_runner::WorkRunner, Handler, Router};
 use crate::msg::Message;
-use bb8_redis::{
-    bb8::{Pool, PooledConnection},
-    redis::{AsyncCommands, RedisResult},
-    RedisConnectionManager,
-};
+use bb8_redis::{bb8::Pool, redis::AsyncCommands, RedisConnectionManager};
 use std::iter::Iterator;
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::{sleep, Duration};
@@ -83,7 +79,7 @@ where
 
 pub struct Server<D> {
     pool: Pool<RedisConnectionManager>,
-    root: Module,
+    root: Module<D>,
     workers: usize,
     data: D,
 }
@@ -106,21 +102,25 @@ where
 
 impl<D> Server<D>
 where
-    D: Clone + 'static,
+    D: Clone + Send + Sync + 'static,
 {
     pub fn new(data: D, pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
         Self {
             pool,
             root: Module::new(),
             data,
-	    workers,
+            workers,
         }
+    }
+
+    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler<D>>> {
+        self.root.lookup(path)
     }
 
     pub async fn run(self) -> Result<()> {
         let pool = self.pool;
         let keys = self.root.functions();
-        let runner = WorkRunner::new(pool.clone(), self.root);
+        let runner = WorkRunner::new(pool.clone(), self.data, self.root);
         let mut workers = WorkerPool::new(Arc::new(runner), self.workers);
         loop {
             let worker_handler = workers.get().await;
@@ -133,14 +133,14 @@ where
                 }
             };
 
-            if let Ok((command, msg)) = msg_res {
-                // decode an encoded data by me which will not panic
-                let data = base64::decode(msg.data).unwrap(); // <- not safe
-                let handler = self
-                    .root
-                    .lookup(command)
-                    .context("handler not found this should never happen")
-                    .unwrap();
+            let (command, message): (String, Message) = match conn.brpop(&keys, 0).await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    log::error!("failed to get next command: {}", err);
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
 
             if let Err(err) = worker_handler.send((command, message)) {
                 log::debug!("can not send job to worker because of '{}'", err);

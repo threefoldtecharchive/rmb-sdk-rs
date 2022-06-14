@@ -18,7 +18,7 @@ pub struct HandlerOutput {
 }
 
 #[async_trait::async_trait]
-pub trait Handler<D>: 'static
+pub trait Handler<D>: Send + Sync + 'static
 where
     D: 'static,
 {

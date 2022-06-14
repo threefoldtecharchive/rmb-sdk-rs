@@ -3,7 +3,7 @@ mod msg;
 pub mod server;
 mod util;
 
-pub use client::{Client};
+pub use client::Client;
 
 #[cfg(test)]
 mod tests {
@@ -39,13 +39,13 @@ mod tests {
             .context("unable to build pool or redis connection manager")
             .unwrap();
 
-        let server = Server::new(pool, 20);
+        let server = Server::new(AppData, pool, 20);
 
         server
     }
 
     #[derive(Clone)]
-    struct AppData {}
+    struct AppData;
 
     /* async */
     #[handler]

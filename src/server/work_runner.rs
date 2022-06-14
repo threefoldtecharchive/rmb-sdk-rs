@@ -11,14 +11,19 @@ use crate::{msg::Message, util::Queue};
 
 use super::{HandlerInput, HandlerOutput, Module};
 
-pub struct WorkRunner {
+pub struct WorkRunner<D> {
     pool: Pool<RedisConnectionManager>,
-    root: Module,
+    root: Module<D>,
+    data: D,
 }
 
-impl WorkRunner {
-    pub fn new(pool: Pool<RedisConnectionManager>, root: Module) -> Self {
-        WorkRunner { pool, root: root }
+impl<D> WorkRunner<D> {
+    pub fn new(pool: Pool<RedisConnectionManager>, data: D, root: Module<D>) -> Self {
+        WorkRunner {
+            pool,
+            data,
+            root: root,
+        }
     }
 
     #[inline]
@@ -56,7 +61,10 @@ impl WorkRunner {
 }
 
 #[async_trait]
-impl Work for WorkRunner {
+impl<D> Work for WorkRunner<D>
+where
+    D: Clone + Send + Sync + 'static,
+{
     type Input = (String, Message);
     type Output = ();
     async fn run(&self, input: Self::Input) -> Self::Output {
@@ -68,11 +76,15 @@ impl Work for WorkRunner {
             .context("handler not found this should never happen")
             .unwrap();
 
+        let state = self.data.clone();
         let out = handler
-            .call(HandlerInput {
-                data: data,
-                schema: msg.schema.clone(),
-            })
+            .call(
+                state,
+                HandlerInput {
+                    data: data,
+                    schema: msg.schema.clone(),
+                },
+            )
             .await;
 
         Self::prepare(&mut msg, out).await;

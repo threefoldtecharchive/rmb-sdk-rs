@@ -31,11 +31,9 @@ pub fn handler(_attr: TokenStream, input: TokenStream) -> TokenStream {
         #vis struct #name;
 
         #[async_trait::async_trait]
-==== BASE ====
-        impl Handler<#d> for #name
+        impl Handler<#p> for #name
         {
-            async fn call(&self, data: #d, input: HandlerInput) -> Result<HandlerOutput> {
-==== BASE ====
+            async fn call(&self, data: #p, input: HandlerInput) -> Result<HandlerOutput> {
                 #input
 
                 #name(data, input).await
