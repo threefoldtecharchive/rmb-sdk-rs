@@ -1,23 +1,19 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use workers::WorkerPool;
 
 use super::{work_runner::WorkRunner, Handler, Router};
 use crate::msg::Message;
-use bb8_redis::{
-    bb8::{Pool, PooledConnection},
-    redis::{AsyncCommands, RedisResult},
-    RedisConnectionManager,
-};
+use bb8_redis::{bb8::Pool, redis::AsyncCommands, RedisConnectionManager};
 use std::iter::Iterator;
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::{sleep, Duration};
 
-pub struct Module {
-    modules: HashMap<String, Module>,
-    handlers: HashMap<String, Box<dyn Handler>>,
+pub struct Module<D> {
+    modules: HashMap<String, Module<D>>,
+    handlers: HashMap<String, Box<dyn Handler<D>>>,
 }
 
-impl Module {
+impl<D> Module<D> {
     fn new() -> Self {
         Self {
             modules: HashMap::default(),
@@ -25,13 +21,13 @@ impl Module {
         }
     }
 
-    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler>> {
+    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler<D>>> {
         let parts: Vec<&str> = path.as_ref().split(".").collect();
 
         self.lookup_parts(&parts)
     }
 
-    fn lookup_parts(&self, parts: &[&str]) -> Option<&Box<dyn Handler>> {
+    fn lookup_parts(&self, parts: &[&str]) -> Option<&Box<dyn Handler<D>>> {
         match parts.len() {
             0 => None,
             1 => self.handlers.get(parts[0]),
@@ -55,10 +51,13 @@ impl Module {
     }
 }
 
-impl Router for Module {
-    type Module = Module;
+impl<D> Router<D> for Module<D>
+where
+    D: 'static,
+{
+    type Module = Module<D>;
 
-    fn module<S: Into<String>>(&mut self, name: S) -> &mut Module {
+    fn module<S: Into<String>>(&mut self, name: S) -> &mut Module<D> {
         let name = name.into();
         assert!(!name.contains("."), "module name cannot contain a dot");
         self.modules
@@ -66,7 +65,7 @@ impl Router for Module {
             .or_insert_with(|| Module::new())
     }
 
-    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler) -> &mut Self {
+    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self {
         let name = name.into();
         assert!(!name.contains("."), "module name cannot contain a dot");
         if self.handlers.contains_key(&name) {
@@ -78,42 +77,50 @@ impl Router for Module {
     }
 }
 
-pub struct Server {
+pub struct Server<D> {
     pool: Pool<RedisConnectionManager>,
-    root: Module,
+    root: Module<D>,
     workers: usize,
+    data: D,
 }
 
-impl Router for Server {
-    type Module = Module;
+impl<D> Router<D> for Server<D>
+where
+    D: 'static,
+{
+    type Module = Module<D>;
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module {
         self.root.module(name)
     }
 
-    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler) -> &mut Self {
+    fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self {
         self.root.handle(name, handler);
         self
     }
 }
 
-impl Server {
-    pub fn new(pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
+impl<D> Server<D>
+where
+    D: Clone + Send + Sync + 'static,
+{
+    pub fn new(data: D, pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
         Self {
             pool,
             root: Module::new(),
+            data,
             workers,
         }
     }
 
-    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler>> {
+    pub fn lookup<S: AsRef<str>>(&self, path: S) -> Option<&Box<dyn Handler<D>>> {
         self.root.lookup(path)
     }
 
     pub async fn run(self) -> Result<()> {
         let pool = self.pool;
         let keys = self.root.functions();
-        let runner = WorkRunner::new(pool.clone(), self.root);
+        let runner = WorkRunner::new(pool.clone(), self.data, self.root);
         let mut workers = WorkerPool::new(Arc::new(runner), self.workers);
         loop {
             let worker_handler = workers.get().await;
