@@ -1,4 +1,4 @@
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
@@ -7,23 +7,31 @@ use bb8_redis::{
 };
 use workers::Work;
 
-use crate::{
-    msg::{Message, MessageBuilder},
-    util::Queue,
-};
+use crate::{msg::Message, util::Queue};
 
-use super::{HandlerInput, HandlerOutput, Module};
+use super::{Handler, HandlerInput, HandlerOutput, Module, Router};
 
-type Reply = MessageBuilder;
-
-#[derive(Clone)]
 pub struct WorkRunner {
     pool: Pool<RedisConnectionManager>,
+    root: Module,
+}
+
+impl Router for WorkRunner {
+    type Module = Module;
+
+    fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module {
+        self.root.module(name)
+    }
+
+    fn handle<S: Into<String>>(&mut self, name: S, handler: Handler) -> &mut Self {
+        self.root.handle(name, handler);
+        self
+    }
 }
 
 impl WorkRunner {
-    pub fn new(pool: Pool<RedisConnectionManager>) -> Self {
-        WorkRunner { pool }
+    pub fn new(pool: Pool<RedisConnectionManager>, root: Module) -> Self {
+        WorkRunner { pool, root: root }
     }
 
     async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
@@ -34,6 +42,14 @@ impl WorkRunner {
             .context("unable to retrieve a redis connection from the pool")?;
 
         Ok(conn)
+    }
+
+    pub fn functions(&self) -> Vec<String> {
+        self.root.functions()
+    }
+
+    pub fn lookup<S: AsRef<str>>(&self, cmd: S) -> Option<&Handler> {
+        self.root.lookup(cmd)
     }
 
     async fn prepare(msg: &mut Message, result: HandlerOutput) {
@@ -56,12 +72,13 @@ impl WorkRunner {
 
 #[async_trait]
 impl Work for WorkRunner {
-    type Input = (String, Message, &'static Module);
+    type Input = (String, Message);
     type Output = ();
     async fn run(&self, input: Self::Input) -> Self::Output {
-        let (command, mut msg, root) = input;
+        let (command, mut msg) = input;
         let data = base64::decode(&msg.data).unwrap(); // <- not safe
-        let handler = root
+        let handler = self
+            .root
             .lookup(command)
             .context("handler not found this should never happen")
             .unwrap();

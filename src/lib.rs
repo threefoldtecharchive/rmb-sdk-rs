@@ -3,7 +3,7 @@ mod msg;
 mod server;
 mod util;
 
-pub use client::{Request, Client};
+pub use client::{Client, Request};
 pub use server::Server;
 
 #[cfg(test)]
@@ -91,7 +91,6 @@ mod tests {
         assert!(matches!(server.lookup("version"), Some(_)));
         assert!(matches!(server.lookup("calculator.add"), Some(_)));
         assert!(matches!(server.lookup("scientific.sqr"), Some(_)));
-        assert!(matches!(server.lookup("scientific.add"), Some(_)));
         assert!(matches!(server.lookup("calculator.wrong"), None));
         assert!(matches!(server.lookup("calculator.deep.test"), Some(_)));
     }

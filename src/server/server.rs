@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
 use workers::WorkerPool;
 
-use super::{Handler, HandlerInput, Router, work_runner::WorkRunner};
+use super::{work_runner::WorkRunner, Handler, Router};
 use crate::msg::Message;
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
     redis::{AsyncCommands, RedisResult},
     RedisConnectionManager,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration, borrow::BorrowMut, cell::{Cell, RefCell}, rc::Rc};
 use std::iter::Iterator;
+use std::{collections::HashMap, sync::Arc};
 
 pub struct Module {
     modules: HashMap<String, Module>,
@@ -42,7 +42,7 @@ impl Module {
     }
 
     /// return all registered keys
-    fn functions(&self) -> Vec<String> {
+    pub fn functions(&self) -> Vec<String> {
         // todo!: implement with iterators instead
 
         let mut fns: Vec<String> = self.handlers.keys().map(|k| k.to_owned()).collect();
@@ -78,45 +78,46 @@ impl Router for Module {
 }
 
 pub struct Server {
-    root: Module,
     pool: Pool<RedisConnectionManager>,
-    workers: WorkerPool<Arc<WorkRunner>>,
+    runner: WorkRunner,
+    workers: usize,
 }
 
 impl Router for Server {
     type Module = Module;
 
     fn module<S: Into<String>>(&mut self, name: S) -> &mut Self::Module {
-        self.root.module(name)
+        self.runner.module(name)
     }
 
     fn handle<S: Into<String>>(&mut self, name: S, handler: Handler) -> &mut Self {
-        self.root.handle(name, handler);
+        self.runner.handle(name, handler);
         self
     }
 }
 
 impl Server {
-    pub fn new(pool: Pool<RedisConnectionManager>, workers_size: usize) -> Self {
-        let workers = WorkerPool::new(Arc::new(WorkRunner::new(pool.clone())), workers_size);
+    pub fn new(pool: Pool<RedisConnectionManager>, workers: usize) -> Self {
+        let runner = WorkRunner::new(pool.clone(), Module::new());
         Self {
-            root: Module::new(),
-            pool: pool,
-            workers
+            pool,
+            runner,
+            workers,
         }
     }
 
     pub fn functions(&self) -> Vec<String> {
-        self.root.functions()
+        self.runner.functions()
     }
 
     pub fn lookup<S: AsRef<str>>(&self, cmd: S) -> Option<&Handler> {
-        self.root.lookup(cmd)
+        self.runner.lookup(cmd)
     }
 
-    async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
-        let conn = self
-            .pool
+    async fn get_connection(
+        pool: &Pool<RedisConnectionManager>,
+    ) -> Result<PooledConnection<'_, RedisConnectionManager>> {
+        let conn = pool
             .get()
             .await
             .context("unable to retrieve a redis connection from the pool")?;
@@ -124,37 +125,32 @@ impl Server {
         Ok(conn)
     }
 
-    pub async fn run(mut self) -> Result<()> {
-        
-        let keys = self.root.functions();
+    pub async fn run(self) -> Result<()> {
+        let keys = self.functions();
+        let mut workers = WorkerPool::new(Arc::new(self.runner), self.workers);
         loop {
-            let worker_handler = self.workers.get().await;
-            let mut conn = self.get_connection().await?;
+            let worker_handler = workers.get().await;
+            let mut conn = Self::get_connection(&self.pool).await?;
 
             let msg_res: RedisResult<(String, Message)> = conn.brpop(&keys, 0).await;
 
-            if let Ok((command, msg)) = msg_res {
-                // decode an encoded data by me which will not panic
-                let data = base64::decode(msg.data).unwrap(); // <- not safe
-                let handler = self
-                    .root
-                    .lookup(command)
-                    .context("handler not found this should never happen")
-                    .unwrap();
+            let (command, msg) = match msg_res {
+                Ok(msg) => msg,
+                Err(err) => {
+                    log::debug!("redis error happened because of '{}'", err);
+                    continue;
+                }
+            };
 
-                let _out = handler(HandlerInput {
-                    data: data,
-                    schema: msg.schema,
-                });
-
-
-
-                // todo:
-                // - handler is not async. hence
-                //  - you can only process single command at a time
-                //  - you cannot control number of workers.
-                //  - handler code can't do async work
+            if let Err(err) = worker_handler.send((command, msg)) {
+                log::debug!("can not send job to worker because of '{}'", err);
             }
+
+            // todo:
+            // - handler is not async. hence
+            //  - you can only process single command at a time
+            //  - you cannot control number of workers.
+            //  - handler code can't do async work
         }
     }
 }

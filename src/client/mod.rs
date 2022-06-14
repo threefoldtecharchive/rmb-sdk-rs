@@ -11,9 +11,7 @@ use bb8_redis::{
 use crate::msg::MessageBuilder;
 use response::Response;
 
-
 pub type Request = MessageBuilder;
-
 
 pub struct Client {
     pool: Pool<RedisConnectionManager>,
