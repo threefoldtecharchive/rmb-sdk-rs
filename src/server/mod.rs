@@ -1,4 +1,6 @@
 mod server;
+mod work_runner;
+use anyhow::Result;
 
 pub use handler::handler;
 pub use server::{Module, Server};
@@ -16,8 +18,8 @@ pub struct HandlerOutput {
 }
 
 #[async_trait::async_trait]
-pub trait Handler: 'static {
-    async fn call(&self, input: HandlerInput) -> HandlerOutput;
+pub trait Handler: Send + Sync + 'static {
+    async fn call(&self, input: HandlerInput) -> Result<HandlerOutput>;
 }
 
 pub trait Router {

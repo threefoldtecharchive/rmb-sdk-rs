@@ -1,4 +1,3 @@
-pub mod request;
 pub mod response;
 
 use crate::util::Queue;
@@ -8,8 +7,11 @@ use bb8_redis::{
     redis::AsyncCommands,
     RedisConnectionManager,
 };
-use request::Request;
+
+use crate::msg::MessageBuilder;
 use response::Response;
+
+pub type Request = MessageBuilder;
 
 pub struct Client {
     pool: Pool<RedisConnectionManager>,
