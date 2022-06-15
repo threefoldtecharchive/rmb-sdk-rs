@@ -53,3 +53,9 @@ impl From<Request> for Message {
         req.msg
     }
 }
+
+impl From<Message> for Request {
+    fn from(msg: Message) -> Self {
+        Self { msg }
+    }
+}
