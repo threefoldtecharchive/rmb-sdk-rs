@@ -46,40 +46,47 @@ impl Response {
         if timeout == 0 || self.response_num == 0 {
             return Ok(None);
         }
+
         let msg: Message = {
             let mut conn = self.get_connection().await.unwrap();
             conn.brpop(&self.ret_queue, timeout)
                 .await
                 .context("failed to get a response message")?
         };
+
         self.response_num -= 1;
 
-        let payload = if let Some(err) = msg.error {
-            Err(ResponseErr::Remote(err))
-        } else {
-            let data =
-                base64::decode(msg.data).with_context(|| "can not decode the received response");
-
-            if let Err(err) = data {
-                Err(ResponseErr::Protocol(err.to_string()))
-            } else {
-                Ok(Some(data.unwrap()))
-            }
-        };
-
-        Ok(Some(ResponseBody {
-            payload,
-            schema: msg.schema,
-        }))
+        Ok(Some(msg.into()))
     }
 }
 
-type Payload = Result<Option<Vec<u8>>, ResponseErr>;
+type Payload = Result<Vec<u8>, ResponseErr>;
+
+#[derive(Debug)]
 pub enum ResponseErr {
     Protocol(String),
     Remote(String),
 }
+
+#[derive(Debug)]
 pub struct ResponseBody {
     pub payload: Payload,
     pub schema: String,
+}
+
+impl From<Message> for ResponseBody {
+    fn from(msg: Message) -> Self {
+        let payload = match msg.error {
+            Some(err) => Err(ResponseErr::Remote(err)),
+            None => match base64::decode(msg.data) {
+                Ok(data) => Ok(data),
+                Err(err) => Err(ResponseErr::Protocol(err.to_string())),
+            },
+        };
+
+        ResponseBody {
+            payload,
+            schema: msg.schema,
+        }
+    }
 }

@@ -20,7 +20,7 @@ mod tests {
     };
 
     use crate::{
-        client::Request,
+        client::{response::ResponseBody, Request},
         msg::Message,
         server::{HandlerInput, HandlerOutput},
     };
@@ -119,8 +119,8 @@ mod tests {
             }
         }
 
-        pub async fn push_cmd(&self) {
-            let req = Request::new("calculator.add").args([1, 3, 4]);
+        pub async fn add(&self, a: f64, b: f64) {
+            let req = Request::new("calculator.add").args([a, b]);
             let mut conn = self.get_connection().await.unwrap();
             let _res: usize = conn
                 .rpush("msgbus.calculator.add", req.body())
@@ -147,10 +147,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_process() {
-        let remote_rmb = MockRmb::new().await;
-        remote_rmb.push_cmd().await;
-
+    async fn test_server_routing() {
         let mut server: Server<AppData> = create_rmb_server().await;
         server.handle("version", version);
 
@@ -194,5 +191,35 @@ mod tests {
         // test divide by zero
         let handler = server.lookup("calculator.div").unwrap();
         assert!(handler.call(AppData, input).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_server_process() {
+        let remote_rmb = MockRmb::new().await;
+
+        let mut server: Server<AppData> = create_rmb_server().await;
+
+        let calculator = server.module("calculator");
+        calculator
+            .handle("add", add)
+            .handle("mul", mul)
+            .handle("div", div);
+
+        tokio::spawn(server.run());
+
+        remote_rmb.add(10.0, 20.0).await;
+        let reply = remote_rmb.pop_reply().await;
+
+        assert!(reply.is_ok());
+        let msg = reply.unwrap();
+        let reply: ResponseBody = msg.into();
+
+        assert!(reply.payload.is_ok());
+        assert_eq!("application/json", reply.schema);
+        let reply = reply.payload.unwrap();
+
+        let out: f64 = serde_json::from_slice(&reply).unwrap();
+
+        assert_eq!(30.0, out);
     }
 }
