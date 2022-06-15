@@ -1,6 +1,7 @@
-use crate::msg::Message;
+use crate::protocol::Message;
 use crate::util;
 use serde::ser::Serialize;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct Request {
@@ -11,23 +12,9 @@ impl Request {
     pub fn new<C: Into<String>>(cmd: C) -> Self {
         let mut msg = Message::default();
         msg.reply = util::unique_id().to_string();
-        msg.now = util::timestamp() as u64;
         msg.command = cmd.into();
 
         Self { msg }
-    }
-
-    pub fn update_timestamp(mut self) -> Self {
-        self.msg.now = util::timestamp() as u64;
-        self
-    }
-
-    pub fn get_ret(&self) -> &String {
-        &self.msg.reply
-    }
-
-    pub fn calc_deadline(&self) -> usize {
-        self.msg.now as usize + self.msg.expiration
     }
 
     pub fn destination(mut self, destination: u32) -> Self {
@@ -44,8 +31,8 @@ impl Request {
         self
     }
 
-    pub fn expiration(mut self, exp: usize) -> Self {
-        self.msg.expiration = exp;
+    pub fn expiration(mut self, exp: Duration) -> Self {
+        self.msg.expiration = exp.as_secs();
         self
     }
 
@@ -53,22 +40,16 @@ impl Request {
         self.msg.destination.len()
     }
 
-    pub fn args<A: AsRef<[u8]>>(mut self, args: A) -> Self {
-        let data = base64::encode(args.as_ref());
+    pub fn args<A: Serialize>(mut self, args: A) -> Self {
+        let body = serde_json::to_vec(&args).unwrap();
+        let data = base64::encode(&body);
         self.msg.data = data;
         self
     }
-
-    pub fn body(&self) -> Message {
-        self.msg.clone()
-    }
 }
 
-impl Serialize for Request {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.msg.serialize(serializer)
+impl From<Request> for Message {
+    fn from(req: Request) -> Self {
+        req.msg
     }
 }

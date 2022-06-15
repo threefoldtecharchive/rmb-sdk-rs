@@ -2,7 +2,7 @@ use anyhow::Result;
 use workers::WorkerPool;
 
 use super::{work_runner::WorkRunner, Handler, Router};
-use crate::msg::Message;
+use crate::protocol::Message;
 use bb8_redis::{bb8::Pool, redis::AsyncCommands, RedisConnectionManager};
 use std::iter::Iterator;
 use std::{collections::HashMap, sync::Arc};

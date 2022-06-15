@@ -1,6 +1,8 @@
+pub mod builder;
 pub mod response;
 
-use crate::util::Queue;
+use crate::protocol::{Message, Queue};
+use crate::util::timestamp;
 use anyhow::{Context, Result};
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
@@ -8,10 +10,9 @@ use bb8_redis::{
     RedisConnectionManager,
 };
 
-use crate::msg::MessageBuilder;
 use response::Response;
 
-pub type Request = MessageBuilder;
+pub type Request = builder::Request;
 
 pub struct Client {
     pool: Pool<RedisConnectionManager>,
@@ -33,17 +34,23 @@ impl Client {
     }
 
     pub async fn send(&self, req: Request) -> Result<Response> {
-        let mut conn = self.get_connection().await?;
-        conn.rpush(Queue::Local.as_ref(), req.body())
-            .await
-            .context("unable to send your message")?;
+        let mut msg: Message = req.into();
 
+        // we set and calculate deadline based on the sending time
+        // not on the message creation time.
+        msg.now = timestamp();
+        let deadline = msg.now + msg.expiration;
         let response = Response::new(
             self.pool.clone(),
-            req.get_ret().to_owned(),
-            req.destinations_len(),
-            req.calc_deadline(),
+            msg.reply.clone(),
+            msg.destination.len(),
+            deadline,
         );
+
+        let mut conn = self.get_connection().await?;
+        conn.rpush(Queue::Local.as_ref(), msg)
+            .await
+            .context("unable to send your message")?;
 
         Ok(response)
     }

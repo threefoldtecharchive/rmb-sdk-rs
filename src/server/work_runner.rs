@@ -7,7 +7,7 @@ use bb8_redis::{
 };
 use workers::Work;
 
-use crate::{msg::Message, util::Queue};
+use crate::protocol::{Message, Queue};
 
 use super::{HandlerInput, HandlerOutput, Module};
 

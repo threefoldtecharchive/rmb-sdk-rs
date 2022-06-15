@@ -1,9 +1,26 @@
-mod builder;
-
 use crate::util;
 use bb8_redis::redis;
-pub use builder::*;
 use serde::{Deserialize, Serialize};
+
+pub enum Queue {
+    Local,
+    Reply,
+}
+
+impl AsRef<str> for Queue {
+    fn as_ref(&self) -> &str {
+        match self {
+            Queue::Local => "msgbus.system.local",
+            Queue::Reply => "msgbus.system.reply",
+        }
+    }
+}
+
+impl std::fmt::Display for Queue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Message {
@@ -14,7 +31,7 @@ pub struct Message {
     #[serde(rename = "cmd")]
     pub command: String,
     #[serde(rename = "exp")]
-    pub expiration: usize,
+    pub expiration: u64,
     #[serde(rename = "try")]
     pub retry: usize,
     #[serde(rename = "dat")]

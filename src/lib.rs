@@ -1,5 +1,5 @@
 pub mod client;
-mod msg;
+mod protocol;
 pub mod server;
 mod util;
 
@@ -7,7 +7,6 @@ pub use client::Client;
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
 
     use handler::handler;
     use server::{Handler, Router, Server};
@@ -21,7 +20,7 @@ mod tests {
 
     use crate::{
         client::{response::ResponseBody, Request},
-        msg::Message,
+        protocol::Message,
         server::{HandlerInput, HandlerOutput},
     };
 
@@ -121,11 +120,9 @@ mod tests {
 
         pub async fn add(&self, a: f64, b: f64) {
             let req = Request::new("calculator.add").args([a, b]);
+            let msg: Message = req.into();
             let mut conn = self.get_connection().await.unwrap();
-            let _res: usize = conn
-                .rpush("msgbus.calculator.add", req.body())
-                .await
-                .unwrap();
+            let _res: usize = conn.rpush("msgbus.calculator.add", msg).await.unwrap();
         }
 
         pub async fn pop_reply(&self) -> Result<Message> {
