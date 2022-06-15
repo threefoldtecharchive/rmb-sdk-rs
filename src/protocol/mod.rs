@@ -58,7 +58,7 @@ impl Default for Message {
             version: 1,
             id: Default::default(),
             command: Default::default(),
-            expiration: Default::default(),
+            expiration: 5 * 60,
             retry: Default::default(),
             data: Default::default(),
             source: Default::default(),

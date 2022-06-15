@@ -9,6 +9,7 @@ pub struct Request {
 }
 
 impl Request {
+    /// Create a new request to given command
     pub fn new<C: Into<String>>(cmd: C) -> Self {
         let mut msg = Message::default();
         msg.reply = util::unique_id().to_string();
@@ -17,6 +18,7 @@ impl Request {
         Self { msg }
     }
 
+    /// add a new destination to the message
     pub fn destination(mut self, destination: u32) -> Self {
         let mut destination = vec![destination];
         self.msg.destination.append(&mut destination);
@@ -24,22 +26,20 @@ impl Request {
         self
     }
 
-    pub fn destinations(mut self, destinations: Vec<u32>) -> Self {
-        let mut destinations = destinations;
-        self.msg.destination.append(&mut destinations);
+    /// add all destinations at once
+    pub fn destinations<T: Iterator<Item = u32>>(mut self, destinations: T) -> Self {
+        self.msg.destination.extend(destinations);
 
         self
     }
 
+    /// set request expiration time
     pub fn expiration(mut self, exp: Duration) -> Self {
         self.msg.expiration = exp.as_secs();
         self
     }
 
-    pub fn destinations_len(&self) -> usize {
-        self.msg.destination.len()
-    }
-
+    /// set command arguments to given object (request body)
     pub fn args<A: Serialize>(mut self, args: A) -> Self {
         let body = serde_json::to_vec(&args).unwrap();
         let data = base64::encode(&body);

@@ -19,8 +19,17 @@ pub struct Client {
 }
 
 impl Client {
+    /// Client creates a new client
     pub fn new(pool: Pool<RedisConnectionManager>) -> Self {
         Self { pool }
+    }
+
+    /// create a client from URL
+    pub async fn from<U: AsRef<str>>(u: U) -> Result<Self> {
+        let mgr = RedisConnectionManager::new(u.as_ref())?;
+        let pool = Pool::builder().max_size(20).build(mgr).await?;
+
+        Ok(Self { pool })
     }
 
     async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
@@ -33,6 +42,7 @@ impl Client {
         Ok(conn)
     }
 
+    /// send a request and get a response object
     pub async fn send(&self, req: Request) -> Result<Response> {
         let mut msg: Message = req.into();
 
