@@ -181,9 +181,18 @@ mod tests {
         let handler = server.lookup("calculator.add").unwrap();
         let result = handler.call(AppData, input).await.unwrap();
 
+        let input = HandlerInput {
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&(10.0, 0)).unwrap(),
+        };
+
         assert_eq!(result.schema, "application/json");
         let result: f64 = serde_json::from_slice(&result.data).unwrap();
 
         assert_eq!(result, 30.0);
+
+        // test divide by zero
+        let handler = server.lookup("calculator.div").unwrap();
+        assert!(handler.call(AppData, input).await.is_err());
     }
 }
