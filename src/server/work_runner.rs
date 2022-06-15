@@ -41,12 +41,19 @@ impl<D> WorkRunner<D> {
         match result {
             Ok(result) => {
                 msg.data = base64::encode(result.data);
+                msg.error = None;
+                msg.schema = result.schema;
             }
-            Err(err) => msg.error = Some(format!("{}", err)),
+            Err(err) => {
+                msg.error = Some(format!("{}", err));
+                msg.data = String::default();
+            }
         }
 
         let src = msg.source;
-        msg.source = msg.destination[0];
+        if msg.destination.len() > 0 {
+            msg.source = msg.destination[0];
+        }
         msg.destination = vec![src];
     }
 
