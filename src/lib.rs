@@ -7,16 +7,26 @@ pub use client::Client;
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use handler::handler;
     use server::{Handler, Router, Server};
 
     use anyhow::{Context, Result};
-    use bb8_redis::{bb8::Pool, RedisConnectionManager};
+    use bb8_redis::{
+        bb8::{Pool, PooledConnection},
+        redis::AsyncCommands,
+        RedisConnectionManager,
+    };
 
-    use crate::server::{HandlerInput, HandlerOutput};
+    use crate::{
+        client::{response::ResponseBody, Request},
+        msg::Message,
+        server::{HandlerInput, HandlerOutput},
+    };
 
     use super::*;
-    async fn _create_rmb_client<'a>() -> Client {
+    async fn get_redis_pool() -> Pool<RedisConnectionManager> {
         let manager = RedisConnectionManager::new("redis://127.0.0.1/")
             .context("unable to create redis connection manager")
             .unwrap();
@@ -25,21 +35,21 @@ mod tests {
             .await
             .context("unable to build pool or redis connection manager")
             .unwrap();
+
+        pool
+    }
+
+    async fn _create_rmb_client<'a>() -> Client {
+        let pool = get_redis_pool().await;
         let client = Client::new(pool);
 
         client
     }
-    async fn create_rmb_server() -> Server<AppData> {
-        let manager = RedisConnectionManager::new("redis://127.0.0.1/")
-            .context("unable to create redis connection manager")
-            .unwrap();
-        let pool = Pool::builder()
-            .build(manager)
-            .await
-            .context("unable to build pool or redis connection manager")
-            .unwrap();
 
-        let server = Server::new(AppData, pool, 20);
+    async fn create_rmb_server() -> Server<AppData> {
+        let pool = get_redis_pool().await;
+
+        let server = Server::new(AppData {}, pool, 20);
 
         server
     }
@@ -49,33 +59,47 @@ mod tests {
 
     /* async */
     #[handler]
-    async fn add(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        unimplemented!()
+    async fn add(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
+        let (a, b): (f64, f64) = args.inputs()?;
+
+        HandlerOutput::from(a + b)
     }
 
     #[handler]
-    async fn mul(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        unimplemented!()
+    async fn mul(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
+        let (a, b): (f64, f64) = args.inputs()?;
+
+        HandlerOutput::from(a * b)
     }
 
     #[handler]
-    async fn div(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        unimplemented!()
+    async fn div(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
+        let (a, b): (f64, f64) = args.inputs()?;
+
+        if b == 0.0 {
+            anyhow::bail!("cannot divide by zero");
+        }
+
+        HandlerOutput::from(a / b)
     }
 
     #[handler]
-    async fn sub(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        unimplemented!()
+    async fn sub(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
+        let (a, b): (f64, f64) = args.inputs()?;
+
+        HandlerOutput::from(a - b)
     }
 
     #[handler]
-    async fn sqr(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        unimplemented!()
+    async fn sqr(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
+        let x: f64 = args.inputs()?;
+
+        HandlerOutput::from(x.sqrt())
     }
 
     #[handler]
     async fn version(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        unimplemented!()
+        HandlerOutput::from("v1.0")
     }
 
     fn build_deep<M: Router<AppData>>(router: &mut M) {
@@ -84,9 +108,47 @@ mod tests {
         router.handle("test", sub);
     }
 
+    struct MockRmb {
+        pool: Pool<RedisConnectionManager>,
+    }
+
+    impl MockRmb {
+        pub async fn new() -> Self {
+            Self {
+                pool: get_redis_pool().await,
+            }
+        }
+
+        pub async fn add(&self, a: f64, b: f64) {
+            let req = Request::new("calculator.add").args([a, b]);
+            let mut conn = self.get_connection().await.unwrap();
+            let _res: usize = conn
+                .rpush("msgbus.calculator.add", req.body())
+                .await
+                .unwrap();
+        }
+
+        pub async fn pop_reply(&self) -> Result<Message> {
+            let mut conn = self.get_connection().await?;
+            let res: (String, Message) = conn.brpop("msgbus.system.reply", 0).await?;
+            Ok(res.1)
+        }
+
+        #[inline]
+        async fn get_connection(&self) -> Result<PooledConnection<'_, RedisConnectionManager>> {
+            let conn = self
+                .pool
+                .get()
+                .await
+                .context("unable to retrieve a redis connection from the pool")?;
+
+            Ok(conn)
+        }
+    }
+
     #[tokio::test]
-    async fn test_whole_process() {
-        let mut server = create_rmb_server().await;
+    async fn test_server_routing() {
+        let mut server: Server<AppData> = create_rmb_server().await;
         server.handle("version", version);
 
         let calculator = server.module("calculator");
@@ -107,5 +169,57 @@ mod tests {
         assert!(matches!(server.lookup("scientific.sqr"), Some(_)));
         assert!(matches!(server.lookup("calculator.wrong"), None));
         assert!(matches!(server.lookup("calculator.deep.test"), Some(_)));
+
+        let input = HandlerInput {
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&(10.0, 20)).unwrap(),
+        };
+        // test add
+        let handler = server.lookup("calculator.add").unwrap();
+        let result = handler.call(AppData, input).await.unwrap();
+
+        let input = HandlerInput {
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&(10.0, 0)).unwrap(),
+        };
+
+        assert_eq!(result.schema, "application/json");
+        let result: f64 = serde_json::from_slice(&result.data).unwrap();
+
+        assert_eq!(result, 30.0);
+
+        // test divide by zero
+        let handler = server.lookup("calculator.div").unwrap();
+        assert!(handler.call(AppData, input).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_server_process() {
+        let remote_rmb = MockRmb::new().await;
+
+        let mut server: Server<AppData> = create_rmb_server().await;
+
+        let calculator = server.module("calculator");
+        calculator
+            .handle("add", add)
+            .handle("mul", mul)
+            .handle("div", div);
+
+        tokio::spawn(server.run());
+
+        remote_rmb.add(10.0, 20.0).await;
+        let reply = remote_rmb.pop_reply().await;
+
+        assert!(reply.is_ok());
+        let msg = reply.unwrap();
+        let reply: ResponseBody = msg.into();
+
+        assert!(reply.payload.is_ok());
+        assert_eq!("application/json", reply.schema);
+        let reply = reply.payload.unwrap();
+
+        let out: f64 = serde_json::from_slice(&reply).unwrap();
+
+        assert_eq!(30.0, out);
     }
 }

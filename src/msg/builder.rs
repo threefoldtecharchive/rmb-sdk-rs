@@ -53,8 +53,9 @@ impl MessageBuilder {
         self.msg.destination.len()
     }
 
-    pub fn args<A: AsRef<[u8]>>(mut self, args: A) -> Self {
-        let data = base64::encode(args.as_ref());
+    pub fn args<A: Serialize>(mut self, args: A) -> Self {
+        let body = serde_json::to_vec(&args).unwrap();
+        let data = base64::encode(&body);
         self.msg.data = data;
         self
     }

@@ -119,7 +119,13 @@ where
 
     pub async fn run(self) -> Result<()> {
         let pool = self.pool;
-        let keys = self.root.functions();
+        let keys: Vec<String> = self
+            .root
+            .functions()
+            .into_iter()
+            .map(|k| format!("msgbus.{}", k))
+            .collect();
+
         let runner = WorkRunner::new(pool.clone(), self.data, self.root);
         let mut workers = WorkerPool::new(Arc::new(runner), self.workers);
         loop {
@@ -142,6 +148,7 @@ where
                 }
             };
 
+            let command: String = command.strip_prefix("msgbus.").unwrap_or("").into();
             if let Err(err) = worker_handler.send((command, message)) {
                 log::debug!("can not send job to worker because of '{}'", err);
             }
