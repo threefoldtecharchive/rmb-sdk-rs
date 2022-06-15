@@ -35,20 +35,24 @@ where
     fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self;
 }
 
-pub fn inputs<'a, T: Deserialize<'a>>(input: &'a HandlerInput) -> Result<T> {
-    let obj = match input.schema.as_str() {
-        "" | "application/json" => {
-            serde_json::from_slice(&input.data).context("failed to decode object")?
-        }
-        _ => anyhow::bail!("not supported encoding type"),
-    };
+impl HandlerInput {
+    pub fn inputs<'a, T: Deserialize<'a>>(&'a self) -> Result<T> {
+        let obj = match self.schema.as_str() {
+            "" | "application/json" => {
+                serde_json::from_slice(&self.data).context("failed to decode object")?
+            }
+            _ => anyhow::bail!("not supported encoding type"),
+        };
 
-    Ok(obj)
+        Ok(obj)
+    }
 }
 
-pub fn output<T: Serialize>(output: T) -> Result<HandlerOutput> {
-    Ok(HandlerOutput {
-        schema: "application/json".into(),
-        data: serde_json::to_vec(&output).context("failed to encode object")?,
-    })
+impl HandlerOutput {
+    pub fn from<T: Serialize>(o: T) -> Result<Self> {
+        Ok(HandlerOutput {
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&o).context("failed to encode object")?,
+        })
+    }
 }

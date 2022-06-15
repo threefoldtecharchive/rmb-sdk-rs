@@ -60,46 +60,46 @@ mod tests {
     /* async */
     #[handler]
     async fn add(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
-        let (a, b): (f64, f64) = server::inputs(&args)?;
+        let (a, b): (f64, f64) = args.inputs()?;
 
-        server::output(a + b)
+        HandlerOutput::from(a + b)
     }
 
     #[handler]
     async fn mul(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
-        let (a, b): (f64, f64) = server::inputs(&args)?;
+        let (a, b): (f64, f64) = args.inputs()?;
 
-        server::output(a * b)
+        HandlerOutput::from(a * b)
     }
 
     #[handler]
     async fn div(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
-        let (a, b): (f64, f64) = server::inputs(&args)?;
+        let (a, b): (f64, f64) = args.inputs()?;
 
         if b == 0.0 {
             anyhow::bail!("cannot divide by zero");
         }
 
-        server::output(a / b)
+        HandlerOutput::from(a / b)
     }
 
     #[handler]
     async fn sub(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
-        let (a, b): (f64, f64) = server::inputs(&args)?;
+        let (a, b): (f64, f64) = args.inputs()?;
 
-        server::output(a - b)
+        HandlerOutput::from(a - b)
     }
 
     #[handler]
     async fn sqr(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
-        let x: f64 = server::inputs(&args)?;
+        let x: f64 = args.inputs()?;
 
-        server::output(x.sqrt())
+        HandlerOutput::from(x.sqrt())
     }
 
     #[handler]
     async fn version(_data: AppData, _args: HandlerInput) -> Result<HandlerOutput> {
-        server::output("v1.0")
+        HandlerOutput::from("v1.0")
     }
 
     fn build_deep<M: Router<AppData>>(router: &mut M) {
