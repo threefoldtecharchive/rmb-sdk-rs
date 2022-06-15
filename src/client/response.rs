@@ -1,4 +1,4 @@
-use crate::msg::Message;
+use crate::protocol::Message;
 use crate::util;
 
 use anyhow::{Context, Result};
@@ -12,7 +12,7 @@ pub struct Response {
     pool: Pool<RedisConnectionManager>,
     ret_queue: String,
     response_num: usize,
-    deadline: usize,
+    deadline: u64,
 }
 
 impl Response {
@@ -20,7 +20,7 @@ impl Response {
         pool: Pool<RedisConnectionManager>,
         ret_queue: String,
         response_num: usize,
-        deadline: usize,
+        deadline: u64,
     ) -> Self {
         Self {
             pool,
@@ -47,16 +47,16 @@ impl Response {
             return Ok(None);
         }
 
-        let msg: Message = {
-            let mut conn = self.get_connection().await.unwrap();
-            conn.brpop(&self.ret_queue, timeout)
+        let msg: Option<Message> = {
+            let mut conn = self.get_connection().await?;
+
+            conn.brpop(&self.ret_queue, timeout as usize)
                 .await
                 .context("failed to get a response message")?
         };
 
         self.response_num -= 1;
-
-        Ok(Some(msg.into()))
+        Ok(msg.map(|m| m.into()))
     }
 }
 
