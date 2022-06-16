@@ -52,7 +52,7 @@ impl Client {
         let deadline = msg.now + msg.expiration;
         let response = Response::new(
             self.pool.clone(),
-            msg.command.clone(),
+            msg.reply.clone(),
             msg.destination.len(),
             deadline,
         );

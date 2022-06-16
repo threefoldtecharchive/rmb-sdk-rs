@@ -162,7 +162,7 @@ mod tests {
             let reply = self.pop_reply().await?;
 
             let mut conn = self.get_connection().await.unwrap();
-            let _res: usize = conn.rpush(reply.command.clone(), reply).await.unwrap();
+            let _res: usize = conn.rpush(reply.reply.clone(), reply).await.unwrap();
             Ok(())
         }
 

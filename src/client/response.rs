@@ -41,25 +41,30 @@ impl Response {
     }
 
     pub async fn get(&mut self) -> Result<Option<ResponseBody>> {
-        let timeout = util::timestamp() > self.deadline;
+        let timeout = util::timestamp() as isize -  self.deadline as isize;
 
-        if timeout || self.response_num == 0 {
+        if timeout > 0 || self.response_num == 0 {
             return Ok(None);
         }
-        let msg: Message = {
+        let msg: Option<Message> = {
             let mut conn = self.get_connection().await?;
 
-            let res: (String, Message) = conn
-                .brpop(&self.ret_queue, timeout as usize)
+            let res: Option<(String, Message)> = conn
+                .brpop(&self.ret_queue, timeout.abs() as usize)
                 .await
                 .context("failed to get a response message")?;
 
-            res.1
+            if let Some((_, msg)) = res {
+                Some(msg)
+            } else {
+                None
+            }
+
         };
         println!("{:?}", msg);
 
         self.response_num -= 1;
-        Ok(Some(msg.into()))
+        Ok(msg.map(|m| {m.into()}))
     }
 }
 
