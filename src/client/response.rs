@@ -41,7 +41,7 @@ impl Response {
     }
 
     pub async fn get(&mut self) -> Result<Option<ResponseBody>> {
-        let timeout = util::timestamp() as isize -  self.deadline as isize;
+        let timeout = util::timestamp() as isize - self.deadline as isize;
 
         if timeout > 0 || self.response_num == 0 {
             return Ok(None);
@@ -59,12 +59,11 @@ impl Response {
             } else {
                 None
             }
-
         };
         println!("{:?}", msg);
 
         self.response_num -= 1;
-        Ok(msg.map(|m| {m.into()}))
+        Ok(msg.map(|m| m.into()))
     }
 }
 
