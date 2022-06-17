@@ -2,6 +2,8 @@
 edition = "2021"
 name = "rmb-sdk"
 version = "0.1.0"
+readme = "README.md"
+description = "sdk toolkit for builing rmb services and clients"
 
 [workspace]
 members = [
