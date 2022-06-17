@@ -5,12 +5,15 @@ pub use handler::handler;
 use serde::{Deserialize, Serialize};
 pub use server::{Module, Server};
 
+/// HandlerInput holds request body.
 #[derive(Debug)]
 pub struct HandlerInput {
+    pub source: u32,
     pub data: Vec<u8>,
     pub schema: String,
 }
 
+/// HandlerOutput holds response body
 #[derive(Debug)]
 pub struct HandlerOutput {
     pub data: Vec<u8>,

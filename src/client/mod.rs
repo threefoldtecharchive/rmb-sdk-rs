@@ -1,5 +1,5 @@
-pub mod builder;
-pub mod response;
+mod builder;
+mod response;
 
 use crate::protocol::{Message, Queue};
 use crate::util::timestamp;
@@ -10,10 +10,11 @@ use bb8_redis::{
     RedisConnectionManager,
 };
 
-use response::Response;
+pub use builder::Request;
+pub use response::{Response, ResponseErr, Return};
 
-pub type Request = builder::Request;
-
+/// A client to use remote services over RMB. The clint abstracts making calls
+/// to remove services.
 pub struct Client {
     pool: Pool<RedisConnectionManager>,
 }
@@ -24,7 +25,7 @@ impl Client {
         Self { pool }
     }
 
-    /// create a client from URL
+    /// create a client from redis URL
     pub async fn from<U: AsRef<str>>(u: U) -> Result<Self> {
         let mgr = RedisConnectionManager::new(u.as_ref())?;
         let pool = Pool::builder().max_size(20).build(mgr).await?;

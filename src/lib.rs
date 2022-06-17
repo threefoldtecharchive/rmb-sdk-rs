@@ -1,12 +1,24 @@
 pub mod client;
-mod protocol;
 pub mod server;
-mod util;
 
-pub use client::Client;
+mod protocol;
+mod util;
+use anyhow::Result;
+use bb8_redis::{bb8::Pool, RedisConnectionManager};
+
+pub const DEFAULT_URL: &str = "redis://127.0.0.1:6379";
+
+/// create redis pool
+pub async fn pool<U: AsRef<str>>(url: U) -> Result<Pool<RedisConnectionManager>> {
+    let mgr = RedisConnectionManager::new(url.as_ref())?;
+    let pool = Pool::builder().max_size(20).build(mgr).await?;
+
+    Ok(pool)
+}
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
 
     use handler::handler;
     use server::{Handler, Router, Server};
@@ -19,7 +31,8 @@ mod tests {
     };
 
     use crate::{
-        client::{response::ResponseBody, Request},
+        client::Client,
+        client::Request,
         protocol::Message,
         server::{HandlerInput, HandlerOutput},
     };
@@ -53,10 +66,14 @@ mod tests {
         server
     }
 
+    fn form_request() -> Request {
+        let req = Request::new("calculator.add");
+        req.args(vec![2, 4]).destination(55)
+    }
+
     #[derive(Clone)]
     struct AppData;
 
-    /* async */
     #[handler]
     async fn add(_data: AppData, args: HandlerInput) -> Result<HandlerOutput> {
         let (a, b): (f64, f64) = args.inputs()?;
@@ -107,6 +124,23 @@ mod tests {
         router.handle("test", sub);
     }
 
+    fn form_modules_handles(server: &mut Server<AppData>) {
+        server.handle("version", version);
+
+        let calculator = server.module("calculator");
+        calculator
+            .handle("add", add)
+            .handle("mul", mul)
+            .handle("div", div);
+
+        let scientific = server.module("scientific");
+        scientific.handle("sqr", sqr);
+
+        // extend modules that is already there. and pass them around
+        let deep = server.module("calculator").module("deep");
+        build_deep(deep);
+    }
+
     struct MockRmb {
         pool: Pool<RedisConnectionManager>,
     }
@@ -118,17 +152,39 @@ mod tests {
             }
         }
 
-        pub async fn add(&self, a: f64, b: f64) {
-            let req = Request::new("calculator.add").args([a, b]);
-            let msg: Message = req.into();
+        pub async fn push_cmd(&self, req: Request) {
             let mut conn = self.get_connection().await.unwrap();
-            let _res: usize = conn.rpush("msgbus.calculator.add", msg).await.unwrap();
+            let msg = Message::from(req);
+            let _res: usize = conn
+                .rpush(format!("msgbus.{}", msg.command), msg)
+                .await
+                .unwrap();
         }
 
         pub async fn pop_reply(&self) -> Result<Message> {
             let mut conn = self.get_connection().await?;
             let res: (String, Message) = conn.brpop("msgbus.system.reply", 0).await?;
-            Ok(res.1)
+            let msg = res.1;
+
+            Ok(msg)
+        }
+
+        pub async fn push_response(&self) -> Result<()> {
+            let reply = self.pop_reply().await?;
+
+            let mut conn = self.get_connection().await.unwrap();
+            let _res: usize = conn.rpush(reply.reply.clone(), reply).await.unwrap();
+            Ok(())
+        }
+
+        pub async fn pop_request(&self) -> Result<()> {
+            let mut conn = self.get_connection().await?;
+            let res: (String, Message) = conn.brpop("msgbus.system.local", 0).await?;
+            let request = Request::from(res.1);
+
+            self.push_cmd(request).await;
+
+            Ok(())
         }
 
         #[inline]
@@ -168,6 +224,7 @@ mod tests {
         assert!(matches!(server.lookup("calculator.deep.test"), Some(_)));
 
         let input = HandlerInput {
+            source: 0,
             schema: "application/json".into(),
             data: serde_json::to_vec(&(10.0, 20)).unwrap(),
         };
@@ -175,15 +232,16 @@ mod tests {
         let handler = server.lookup("calculator.add").unwrap();
         let result = handler.call(AppData, input).await.unwrap();
 
-        let input = HandlerInput {
-            schema: "application/json".into(),
-            data: serde_json::to_vec(&(10.0, 0)).unwrap(),
-        };
-
         assert_eq!(result.schema, "application/json");
         let result: f64 = serde_json::from_slice(&result.data).unwrap();
 
         assert_eq!(result, 30.0);
+
+        let input = HandlerInput {
+            source: 0,
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&(10.0, 0)).unwrap(),
+        };
 
         // test divide by zero
         let handler = server.lookup("calculator.div").unwrap();
@@ -192,31 +250,67 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_process() {
-        let remote_rmb = MockRmb::new().await;
+        // start rmb
+        let rmb = MockRmb::new().await;
 
+        // rmb received a command somewhere and add it to the cmd's queue
+        rmb.push_cmd(form_request()).await;
+
+        // server will process commands
         let mut server: Server<AppData> = create_rmb_server().await;
+        form_modules_handles(&mut server);
 
-        let calculator = server.module("calculator");
-        calculator
-            .handle("add", add)
-            .handle("mul", mul)
-            .handle("div", div);
+        assert!(matches!(server.lookup("version"), Some(_)));
+        assert!(matches!(server.lookup("calculator.add"), Some(_)));
+        assert!(matches!(server.lookup("scientific.sqr"), Some(_)));
+        assert!(matches!(server.lookup("calculator.wrong"), None));
+        assert!(matches!(server.lookup("calculator.deep.test"), Some(_)));
 
-        tokio::spawn(server.run());
+        let _handler = tokio::spawn(server.run());
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
-        remote_rmb.add(10.0, 20.0).await;
-        let reply = remote_rmb.pop_reply().await;
+        // rmb received a reply from the server
+        let mut reply = rmb.pop_reply().await.unwrap();
 
-        assert!(reply.is_ok());
-        let msg = reply.unwrap();
-        let reply: ResponseBody = msg.into();
+        // assert the result
+        let data = base64::decode(reply.data).unwrap();
+        reply.data = String::from_utf8(data).unwrap();
+        let result: f64 = serde_json::from_str(&reply.data).unwrap();
 
-        assert!(reply.payload.is_ok());
-        assert_eq!("application/json", reply.schema);
-        let reply = reply.payload.unwrap();
+        assert_eq!(result, 6.0);
+    }
 
-        let out: f64 = serde_json::from_slice(&reply).unwrap();
+    #[tokio::test]
+    async fn test_client_process() {
+        // start rmb
+        let rmb = MockRmb::new().await;
 
-        assert_eq!(30.0, out);
+        // create request
+        let request = form_request();
+
+        let msg: Message = request.clone().into();
+        // client
+        let client = Client::new(get_redis_pool().await);
+
+        // send request
+        let mut response = client.send(request).await.unwrap();
+
+        // server to handle request
+        let mut server: Server<AppData> = create_rmb_server().await;
+        form_modules_handles(&mut server);
+        let _handler = tokio::spawn(server.run());
+
+        // rmb transfer the request
+        rmb.pop_request().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        rmb.push_response().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // get the response
+        let response_body = response.get().await.unwrap().unwrap();
+        let result: f64 = response_body.outputs().unwrap();
+
+        assert_eq!(result, 6.0);
     }
 }

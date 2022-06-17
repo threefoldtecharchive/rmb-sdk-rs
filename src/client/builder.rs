@@ -3,7 +3,8 @@ use crate::util;
 use serde::ser::Serialize;
 use std::time::Duration;
 
-#[derive(Debug)]
+/// Request object
+#[derive(Debug, Clone)]
 pub struct Request {
     msg: Message,
 }
@@ -51,5 +52,11 @@ impl Request {
 impl From<Request> for Message {
     fn from(req: Request) -> Self {
         req.msg
+    }
+}
+
+impl From<Message> for Request {
+    fn from(msg: Message) -> Self {
+        Self { msg }
     }
 }

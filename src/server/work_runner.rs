@@ -88,6 +88,7 @@ where
             .call(
                 state,
                 HandlerInput {
+                    source: msg.source,
                     data: data,
                     schema: msg.schema.clone(),
                 },
