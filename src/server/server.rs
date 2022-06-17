@@ -117,6 +117,7 @@ where
         self.root.lookup(path)
     }
 
+    /// start this server instance
     pub async fn run(self) -> Result<()> {
         let pool = self.pool;
         let keys: Vec<String> = self

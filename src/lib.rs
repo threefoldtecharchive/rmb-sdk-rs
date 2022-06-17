@@ -1,9 +1,20 @@
 pub mod client;
-mod protocol;
 pub mod server;
-mod util;
 
-pub use client::Client;
+mod protocol;
+mod util;
+use anyhow::Result;
+use bb8_redis::{bb8::Pool, RedisConnectionManager};
+
+pub const DEFAULT_URL: &str = "redis://127.0.0.1:6379";
+
+/// create redis pool
+pub async fn pool<U: AsRef<str>>(url: U) -> Result<Pool<RedisConnectionManager>> {
+    let mgr = RedisConnectionManager::new(url.as_ref())?;
+    let pool = Pool::builder().max_size(20).build(mgr).await?;
+
+    Ok(pool)
+}
 
 #[cfg(test)]
 mod tests {
@@ -145,7 +156,7 @@ mod tests {
             let mut conn = self.get_connection().await.unwrap();
             let msg = Message::from(req);
             let _res: usize = conn
-                .rpush("msgbus.".to_string() + msg.command.as_str(), msg)
+                .rpush(format!("msgbus.{}", msg.command), msg)
                 .await
                 .unwrap();
         }
@@ -189,6 +200,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_server_routing() {
+        let mut server: Server<AppData> = create_rmb_server().await;
+        server.handle("version", version);
+
+        let calculator = server.module("calculator");
+        calculator
+            .handle("add", add)
+            .handle("mul", mul)
+            .handle("div", div);
+
+        let scientific = server.module("scientific");
+        scientific.handle("sqr", sqr);
+
+        // extend modules that is already there. and pass them around
+        let deep = server.module("calculator").module("deep");
+        build_deep(deep);
+
+        assert!(matches!(server.lookup("version"), Some(_)));
+        assert!(matches!(server.lookup("calculator.add"), Some(_)));
+        assert!(matches!(server.lookup("scientific.sqr"), Some(_)));
+        assert!(matches!(server.lookup("calculator.wrong"), None));
+        assert!(matches!(server.lookup("calculator.deep.test"), Some(_)));
+
+        let input = HandlerInput {
+            source: 0,
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&(10.0, 20)).unwrap(),
+        };
+        // test add
+        let handler = server.lookup("calculator.add").unwrap();
+        let result = handler.call(AppData, input).await.unwrap();
+
+        assert_eq!(result.schema, "application/json");
+        let result: f64 = serde_json::from_slice(&result.data).unwrap();
+
+        assert_eq!(result, 30.0);
+
+        let input = HandlerInput {
+            source: 0,
+            schema: "application/json".into(),
+            data: serde_json::to_vec(&(10.0, 0)).unwrap(),
+        };
+
+        // test divide by zero
+        let handler = server.lookup("calculator.div").unwrap();
+        assert!(handler.call(AppData, input).await.is_err());
+    }
+
+    #[tokio::test]
     async fn test_server_process() {
         // start rmb
         let rmb = MockRmb::new().await;
@@ -228,6 +288,7 @@ mod tests {
         // create request
         let request = form_request();
 
+        let msg: Message = request.clone().into();
         // client
         let client = Client::new(get_redis_pool().await);
 
@@ -248,8 +309,7 @@ mod tests {
 
         // get the response
         let response_body = response.get().await.unwrap().unwrap();
-        let msg = response_body.payload.unwrap();
-        let result: f64 = serde_json::from_slice(&msg).unwrap();
+        let result: f64 = response_body.outputs().unwrap();
 
         assert_eq!(result, 6.0);
     }

@@ -1,5 +1,6 @@
 use crate::protocol::Message;
 use crate::util;
+use serde::Deserialize;
 
 use anyhow::{Context, Result};
 use bb8_redis::{
@@ -8,6 +9,7 @@ use bb8_redis::{
     RedisConnectionManager,
 };
 
+/// Response object
 pub struct Response {
     pool: Pool<RedisConnectionManager>,
     ret_queue: String,
@@ -16,7 +18,7 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn new(
+    pub(crate) fn new(
         pool: Pool<RedisConnectionManager>,
         ret_queue: String,
         response_num: usize,
@@ -40,27 +42,29 @@ impl Response {
         Ok(conn)
     }
 
-    pub async fn get(&mut self) -> Result<Option<ResponseBody>> {
-        let timeout = util::timestamp() as isize - self.deadline as isize;
+    /// wait for next response for this request. Usually the caller
+    /// need to wait in a loop. None is returned if all expected responses
+    /// has been received or expiration time of message has been exceeded.
+    pub async fn get(&mut self) -> Result<Option<Return>> {
+        let timeout = match self.deadline.checked_sub(util::timestamp()) {
+            Some(timeout) => timeout,
+            None => return Ok(None),
+        };
 
-        if timeout > 0 || self.response_num == 0 {
+        if self.response_num == 0 {
             return Ok(None);
         }
+
         let msg: Option<Message> = {
             let mut conn = self.get_connection().await?;
 
             let res: Option<(String, Message)> = conn
-                .brpop(&self.ret_queue, timeout.abs() as usize)
+                .brpop(&self.ret_queue, timeout as usize)
                 .await
                 .context("failed to get a response message")?;
 
-            if let Some((_, msg)) = res {
-                Some(msg)
-            } else {
-                None
-            }
+            res.map(|(_, msg)| msg)
         };
-        println!("{:?}", msg);
 
         self.response_num -= 1;
         Ok(msg.map(|m| m.into()))
@@ -69,19 +73,22 @@ impl Response {
 
 type Payload = Result<Vec<u8>, ResponseErr>;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum ResponseErr {
+    #[error("protocol error: {0}")]
     Protocol(String),
+    #[error("remote error: {0}")]
     Remote(String),
 }
 
 #[derive(Debug)]
-pub struct ResponseBody {
+pub struct Return {
+    pub source: u32,
     pub payload: Payload,
     pub schema: String,
 }
 
-impl From<Message> for ResponseBody {
+impl From<Message> for Return {
     fn from(msg: Message) -> Self {
         let payload = match msg.error {
             Some(err) => Err(ResponseErr::Remote(err)),
@@ -91,9 +98,31 @@ impl From<Message> for ResponseBody {
             },
         };
 
-        ResponseBody {
-            payload,
+        Return {
+            source: msg.source,
             schema: msg.schema,
+            payload,
+        }
+    }
+}
+
+impl Return {
+    /// auto decode the returned response to concrete types.
+    pub fn outputs<'a, T>(&'a self) -> Result<T, ResponseErr>
+    where
+        T: Deserialize<'a>,
+    {
+        match &self.payload {
+            Ok(data) => {
+                let obj = match self.schema.as_str() {
+                    "" | "application/json" => serde_json::from_slice(data)
+                        .map_err(|e| ResponseErr::Remote(format!("schema error {}", e)))?,
+                    _ => return Err(ResponseErr::Remote("not supported encoding type".into())),
+                };
+
+                Ok(obj)
+            }
+            Err(err) => Err(err.clone()),
         }
     }
 }

@@ -3,7 +3,8 @@ use crate::util;
 use serde::ser::Serialize;
 use std::time::Duration;
 
-#[derive(Debug)]
+/// Request object
+#[derive(Debug, Clone)]
 pub struct Request {
     msg: Message,
 }
