@@ -9,9 +9,17 @@ use bb8_redis::{
     redis::AsyncCommands,
     RedisConnectionManager,
 };
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 pub use builder::Request;
 pub use response::{Response, ResponseErr, Return};
+
+#[derive(Serialize, Deserialize)]
+pub struct Upload<'a> {
+    pub path: &'a Path,
+    pub cmd: &'a str,
+}
 
 /// A client to use remote services over RMB. The clint abstracts making calls
 /// to remove services.
@@ -64,5 +72,23 @@ impl Client {
             .context("unable to send your message")?;
 
         Ok(response)
+    }
+
+    /// short cut to send(Result) with file upload command
+    pub async fn upload<P, C>(&self, dst: u32, cmd: C, path: P) -> Result<Response>
+    where
+        P: AsRef<Path>,
+        C: AsRef<str>,
+    {
+        let args = Upload {
+            path: path.as_ref(),
+            cmd: cmd.as_ref(),
+        };
+
+        let request = Request::new("msgbus.system.file.upload")
+            .destination(dst)
+            .args(args);
+
+        self.send(request).await
     }
 }

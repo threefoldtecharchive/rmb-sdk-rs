@@ -16,6 +16,10 @@ pub async fn pool<U: AsRef<str>>(url: U) -> Result<Pool<RedisConnectionManager>>
     Ok(pool)
 }
 
+pub async fn default() -> Result<Pool<RedisConnectionManager>> {
+    pool(DEFAULT_URL).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
