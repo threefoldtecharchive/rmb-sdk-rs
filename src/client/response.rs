@@ -1,5 +1,4 @@
-use crate::protocol::Message;
-use crate::util;
+use crate::{protocol::IncomingResponse, util};
 use serde::Deserialize;
 
 use anyhow::{Context, Result};
@@ -10,14 +9,14 @@ use bb8_redis::{
 };
 
 /// Response object
-pub struct Response {
+pub struct Call {
     pool: Pool<RedisConnectionManager>,
     ret_queue: String,
     response_num: usize,
     deadline: u64,
 }
 
-impl Response {
+impl Call {
     pub(crate) fn new(
         pool: Pool<RedisConnectionManager>,
         ret_queue: String,
@@ -55,10 +54,10 @@ impl Response {
             return Ok(None);
         }
 
-        let msg: Option<Message> = {
+        let msg: Option<IncomingResponse> = {
             let mut conn = self.get_connection().await?;
 
-            let res: Option<(String, Message)> = conn
+            let res: Option<(String, IncomingResponse)> = conn
                 .brpop(&self.ret_queue, timeout as usize)
                 .await
                 .context("failed to get a response message")?;
@@ -83,15 +82,15 @@ pub enum ResponseErr {
 
 #[derive(Debug)]
 pub struct Return {
-    pub source: u32,
+    pub source: String,
     pub payload: Payload,
-    pub schema: String,
+    pub schema: Option<String>,
 }
 
-impl From<Message> for Return {
-    fn from(msg: Message) -> Self {
+impl From<IncomingResponse> for Return {
+    fn from(msg: IncomingResponse) -> Self {
         let payload = match msg.error {
-            Some(err) => Err(ResponseErr::Remote(err)),
+            Some(err) => Err(ResponseErr::Remote(err.message)),
             None => match base64::decode(msg.data) {
                 Ok(data) => Ok(data),
                 Err(err) => Err(ResponseErr::Protocol(err.to_string())),
@@ -114,9 +113,11 @@ impl Return {
     {
         match &self.payload {
             Ok(data) => {
-                let obj = match self.schema.as_str() {
-                    "" | "application/json" => serde_json::from_slice(data)
-                        .map_err(|e| ResponseErr::Remote(format!("schema error {}", e)))?,
+                let obj = match self.schema {
+                    Some(ref schema) if schema == "application/json" => {
+                        serde_json::from_slice(data)
+                            .map_err(|e| ResponseErr::Remote(format!("schema error {}", e)))?
+                    }
                     _ => return Err(ResponseErr::Remote("not supported encoding type".into())),
                 };
 

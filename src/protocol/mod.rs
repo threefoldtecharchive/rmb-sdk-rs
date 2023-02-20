@@ -1,4 +1,3 @@
-use crate::util;
 use bb8_redis::redis;
 use serde::{Deserialize, Serialize};
 
@@ -22,100 +21,144 @@ impl std::fmt::Display for Queue {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Message {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct IncomingRequest {
     #[serde(rename = "ver")]
     pub version: usize,
-    #[serde(rename = "uid")]
-    pub id: String,
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    #[serde(rename = "src")]
+    pub source: String,
     #[serde(rename = "cmd")]
     pub command: String,
     #[serde(rename = "exp")]
     pub expiration: u64,
-    #[serde(rename = "try")]
-    pub retry: usize,
     #[serde(rename = "dat")]
     pub data: String,
-    #[serde(rename = "src")]
-    pub source: u32,
-    #[serde(rename = "dst")]
-    pub destination: Vec<u32>,
+    #[serde(rename = "tag")]
+    pub tags: Option<String>,
     #[serde(rename = "ret")]
-    pub reply: String,
+    pub reply_to: String,
     #[serde(rename = "shm")]
-    pub schema: String,
+    pub schema: Option<String>,
     #[serde(rename = "now")]
-    pub now: u64,
-    #[serde(rename = "err")]
-    pub error: Option<String>,
-    #[serde(rename = "sig")]
-    pub signature: Option<String>,
+    pub timestamp: u64,
 }
 
-impl Default for Message {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            id: Default::default(),
-            command: Default::default(),
-            expiration: 5 * 60,
-            retry: Default::default(),
-            data: Default::default(),
-            source: Default::default(),
-            destination: Default::default(),
-            reply: Default::default(),
-            schema: Default::default(),
-            now: Default::default(),
-            error: None,
-            signature: None,
-        }
-    }
-}
-
-impl Message {
-    pub fn to_json(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(self)
-    }
-
-    pub fn from_json(json: &[u8]) -> serde_json::Result<Self> {
-        serde_json::from_slice(json)
-    }
-
-    pub fn set_now(&mut self) {
-        self.now = util::timestamp() as u64;
-    }
-}
-
-impl TryFrom<Vec<u8>> for Message {
-    type Error = serde_json::Error;
-
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        Message::from_json(&value)
-    }
-}
-
-impl TryInto<Vec<u8>> for Message {
-    type Error = serde_json::Error;
-
-    fn try_into(self) -> Result<Vec<u8>, Self::Error> {
-        self.to_json()
-    }
-}
-
-impl redis::ToRedisArgs for Message {
+impl redis::ToRedisArgs for IncomingRequest {
     fn write_redis_args<W>(&self, out: &mut W)
     where
         W: ?Sized + redis::RedisWrite,
     {
-        let bytes = self.to_json().expect("failed to json encode message");
+        let bytes = serde_json::to_vec(self).expect("failed to json encode message");
         out.write_arg(&bytes);
     }
 }
 
-impl redis::FromRedisValue for Message {
+impl redis::FromRedisValue for IncomingRequest {
     fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
         if let redis::Value::Data(data) = v {
-            Message::from_json(data).map_err(|e| {
+            serde_json::from_slice(data).map_err(|e| {
+                redis::RedisError::from((
+                    redis::ErrorKind::TypeError,
+                    "cannot decode a message from json {}",
+                    e.to_string(),
+                ))
+            })
+        } else {
+            Err(redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "expected a data type from redis",
+            )))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Error {
+    pub code: u32,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OutgoingResponse {
+    #[serde(rename = "ver")]
+    pub version: usize,
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    #[serde(rename = "dat")]
+    pub data: String,
+    #[serde(rename = "dst")]
+    pub destination: String,
+    #[serde(rename = "shm")]
+    pub schema: Option<String>,
+    #[serde(rename = "now")]
+    pub timestamp: u64,
+    #[serde(rename = "err")]
+    pub error: Option<Error>,
+}
+
+impl redis::ToRedisArgs for OutgoingResponse {
+    fn write_redis_args<W>(&self, out: &mut W)
+    where
+        W: ?Sized + redis::RedisWrite,
+    {
+        let bytes = serde_json::to_vec(self).expect("failed to json encode message");
+        out.write_arg(&bytes);
+    }
+}
+
+impl redis::FromRedisValue for OutgoingResponse {
+    fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
+        if let redis::Value::Data(data) = v {
+            serde_json::from_slice(data).map_err(|e| {
+                redis::RedisError::from((
+                    redis::ErrorKind::TypeError,
+                    "cannot decode a message from json {}",
+                    e.to_string(),
+                ))
+            })
+        } else {
+            Err(redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "expected a data type from redis",
+            )))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct IncomingResponse {
+    #[serde(rename = "ver")]
+    pub version: usize,
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    #[serde(rename = "dat")]
+    pub data: String,
+    #[serde(rename = "src")]
+    pub source: String,
+    #[serde(rename = "shm")]
+    pub schema: Option<String>,
+    #[serde(rename = "now")]
+    pub timestamp: u64,
+    #[serde(rename = "err")]
+    pub error: Option<Error>,
+}
+
+impl redis::ToRedisArgs for IncomingResponse {
+    fn write_redis_args<W>(&self, out: &mut W)
+    where
+        W: ?Sized + redis::RedisWrite,
+    {
+        let bytes = serde_json::to_vec(self).expect("failed to json encode message");
+        out.write_arg(&bytes);
+    }
+}
+
+impl redis::FromRedisValue for IncomingResponse {
+    fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
+        if let redis::Value::Data(data) = v {
+            serde_json::from_slice(data).map_err(|e| {
                 redis::RedisError::from((
                     redis::ErrorKind::TypeError,
                     "cannot decode a message from json {}",

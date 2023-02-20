@@ -1,8 +1,7 @@
 mod builder;
 mod response;
 
-use crate::protocol::{Message, Queue};
-use crate::util::timestamp;
+use crate::protocol::Queue;
 use anyhow::{Context, Result};
 use bb8_redis::{
     bb8::{Pool, PooledConnection},
@@ -13,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub use builder::Request;
-pub use response::{Response, ResponseErr, Return};
+pub use response::{Call, ResponseErr, Return};
 
 #[derive(Serialize, Deserialize)]
 pub struct Upload<'a> {
@@ -52,17 +51,16 @@ impl Client {
     }
 
     /// send a request and get a response object
-    pub async fn send(&self, req: Request) -> Result<Response> {
-        let mut msg: Message = req.into();
+    pub async fn send<R: Into<Request>>(&self, req: R) -> Result<Call> {
+        let msg: Request = req.into();
 
         // we set and calculate deadline based on the sending time
         // not on the message creation time.
-        msg.now = timestamp();
-        let deadline = msg.now + msg.expiration;
-        let response = Response::new(
+        let deadline = msg.deadline();
+        let response = Call::new(
             self.pool.clone(),
-            msg.reply.clone(),
-            msg.destination.len(),
+            msg.reply().into(),
+            msg.destinations().len(),
             deadline,
         );
 
@@ -72,23 +70,5 @@ impl Client {
             .context("unable to send your message")?;
 
         Ok(response)
-    }
-
-    /// short cut to send(Result) with file upload command
-    pub async fn upload<P, C>(&self, dst: u32, cmd: C, path: P) -> Result<Response>
-    where
-        P: AsRef<Path>,
-        C: AsRef<str>,
-    {
-        let args = Upload {
-            path: path.as_ref(),
-            cmd: cmd.as_ref(),
-        };
-
-        let request = Request::new("msgbus.system.file.upload")
-            .destination(dst)
-            .args(args);
-
-        self.send(request).await
     }
 }

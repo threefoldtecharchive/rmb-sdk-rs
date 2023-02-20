@@ -7,10 +7,10 @@ pub use server::{Module, Server};
 
 /// HandlerInput holds request body.
 #[derive(Debug)]
-pub struct HandlerInput {
-    pub source: u32,
+pub struct HandlerInput<'a> {
+    pub source: &'a str,
     pub data: Vec<u8>,
-    pub schema: String,
+    pub schema: Option<&'a str>,
 }
 
 /// HandlerOutput holds response body
@@ -38,13 +38,13 @@ where
     fn handle<S: Into<String>>(&mut self, name: S, handler: impl Handler<D>) -> &mut Self;
 }
 
-impl HandlerInput {
-    pub fn inputs<'a, T: Deserialize<'a>>(&'a self) -> Result<T> {
-        let obj = match self.schema.as_str() {
-            "" | "application/json" => {
+impl<'a> HandlerInput<'a> {
+    pub fn inputs<'s, T: Deserialize<'s>>(&'s self) -> Result<T> {
+        let obj = match self.schema {
+            Some(schema) if schema == "application/json" => {
                 serde_json::from_slice(&self.data).context("failed to decode object")?
             }
-            _ => anyhow::bail!("not supported encoding type"),
+            _ => anyhow::bail!("not supported schema"),
         };
 
         Ok(obj)

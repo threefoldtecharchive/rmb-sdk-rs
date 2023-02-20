@@ -7,9 +7,9 @@ use bb8_redis::{
 };
 use workers::Work;
 
-use crate::protocol::{Message, Queue};
+use crate::protocol::{Error, IncomingRequest, OutgoingResponse, Queue};
 
-use super::{HandlerInput, HandlerOutput, Module};
+use super::{HandlerInput, Module};
 
 pub struct WorkRunner<D> {
     pool: Pool<RedisConnectionManager>,
@@ -37,27 +37,7 @@ impl<D> WorkRunner<D> {
         Ok(conn)
     }
 
-    async fn prepare(msg: &mut Message, result: Result<HandlerOutput>) {
-        match result {
-            Ok(result) => {
-                msg.data = base64::encode(result.data);
-                msg.error = None;
-                msg.schema = result.schema;
-            }
-            Err(err) => {
-                msg.error = Some(format!("{}", err));
-                msg.data = String::default();
-            }
-        }
-
-        let src = msg.source;
-        if msg.destination.len() > 0 {
-            msg.source = msg.destination[0];
-        }
-        msg.destination = vec![src];
-    }
-
-    async fn send(&self, msg: Message) -> Result<()> {
+    async fn send(&self, msg: OutgoingResponse) -> Result<()> {
         let mut conn = self.get_connection().await?;
         conn.rpush(Queue::Reply.as_ref(), msg)
             .await
@@ -72,10 +52,10 @@ impl<D> Work for WorkRunner<D>
 where
     D: Clone + Send + Sync + 'static,
 {
-    type Input = (String, Message);
+    type Input = (String, IncomingRequest);
     type Output = ();
     async fn run(&self, input: Self::Input) -> Self::Output {
-        let (command, mut msg) = input;
+        let (command, msg) = input;
         let data = base64::decode(&msg.data).unwrap(); // <- not safe
         let handler = self
             .root
@@ -88,16 +68,39 @@ where
             .call(
                 state,
                 HandlerInput {
-                    source: msg.source,
+                    source: &msg.source,
                     data: data,
-                    schema: msg.schema.clone(),
+                    schema: msg.schema.as_deref(),
                 },
             )
             .await;
 
-        Self::prepare(&mut msg, out).await;
+        let response = OutgoingResponse {
+            version: msg.version,
+            schema: if let Ok(ref out) = out {
+                Some(out.schema.clone())
+            } else {
+                None
+            },
+            reference: msg.reference,
+            destination: msg.source,
+            timestamp: 0,
+            data: if let Ok(ref out) = out {
+                base64::encode(&out.data)
+            } else {
+                String::default()
+            },
+            error: if let Err(err) = out {
+                Some(Error {
+                    code: 0,
+                    message: err.to_string(),
+                })
+            } else {
+                None
+            },
+        };
 
-        if let Err(err) = self.send(msg).await {
+        if let Err(err) = self.send(response).await {
             log::debug!("{}", err);
         }
     }

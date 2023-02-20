@@ -2,7 +2,7 @@ use anyhow::Result;
 use workers::WorkerPool;
 
 use super::{work_runner::WorkRunner, Handler, Router};
-use crate::protocol::Message;
+use crate::protocol::IncomingRequest;
 use bb8_redis::{bb8::Pool, redis::AsyncCommands, RedisConnectionManager};
 use std::iter::Iterator;
 use std::{collections::HashMap, sync::Arc};
@@ -140,7 +140,7 @@ where
                 }
             };
 
-            let (command, message): (String, Message) = match conn.brpop(&keys, 0).await {
+            let (command, request): (String, IncomingRequest) = match conn.brpop(&keys, 0).await {
                 Ok(resp) => resp,
                 Err(err) => {
                     log::error!("failed to get next command: {}", err);
@@ -150,7 +150,7 @@ where
             };
 
             let command: String = command.strip_prefix("msgbus.").unwrap_or("").into();
-            if let Err(err) = worker_handler.send((command, message)) {
+            if let Err(err) = worker_handler.send((command, request)) {
                 log::debug!("can not send job to worker because of '{}'", err);
             }
         }
